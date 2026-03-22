@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel SIM SIM.23.01#1</title>
+    <title>Painel SIM SIM.23.03#2</title>
     <!-- TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts: Inter -->
@@ -25,6 +25,7 @@
             --sims-green-vibrant: #4ade80;
             --danger-bg: #fee2e2;
             --danger-text: #b91c1c;
+            --finance-gold: #f59e0b;
         }
 
         html.dark {
@@ -114,6 +115,10 @@
         html.dark .tab-btn.active {
             color: var(--sims-green-vibrant);
         }
+
+        .negative-balance {
+            color: #ef4444;
+        }
     </style>
 </head>
 <body class="overscroll-none">
@@ -148,7 +153,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getFirestore, collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, serverTimestamp, getDoc, writeBatch, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, serverTimestamp, getDoc, writeBatch, setDoc, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         const firebaseConfig = { 
             apiKey: "AlzaSyBQnBNk6vMfei9faYKsZCChz868RVrkwCE",
@@ -170,11 +175,21 @@
             closedRecords: [],
             parties: [],
             councils: [],
-            laws: [], // Nova coleção de leis
+            laws: [],
             regions: [],
+            taxes: [],
+            specialTaxes: [],
+            fixedExpensesList: [],
+            loans: [],
+            financeConfig: { 
+                lastCycle: null, 
+                totalCirculating: 0,
+                costOfLiving: 0,
+                foodTax: 0
+            },
             electionHistory: [],
             customSectors: [],
-            government: { roles: {}, ministries: [] },
+            government: { roles: {}, ministries: [], salaries: {} },
             election: { isActive: false, candidates: [], votes: [], type: 'prefeito', ministryId: null, isTestMode: false, round: 1 },
             currentResidentId: null,
             currentBusinessId: null,
@@ -191,25 +206,30 @@
                 councils: false, 
                 laws: false,
                 regions: false, 
+                taxes: false,
+                specialTaxes: false,
+                fixedExpensesList: false,
+                financeConfig: false,
                 governmentRoles: false, 
                 governmentConfig: false, 
+                governmentSalaries: false,
                 election: false,
                 electionHistory: false,
                 customSectors: false,
-                closedRecords: false
+                closedRecords: false,
+                loans: false
             },
             initialRenderDone: false,
             charts: {},
             activeStudentTab: 'ativos'
         };
 
-        const currentVersion = 'SIM.23.01#1';
+        const currentVersion = 'SIM.23.03#2';
         const lifeStages = ['Bebê', 'Criança', 'Pré-adolescente', 'Adolescente', 'Adulto', 'Idoso'];
         const genders = ['Homem', 'Mulher', 'Homem Trans', 'Mulher Trans', 'Não-Binário'];
         const ethnicities = ['Asiático(a)', 'Branco(a)', 'Pardo(a)', 'Negro(a)'];
-        // Atualizado com novas opções de relacionamento
         const relationshipTypes = ['Cônjuge', 'Pai', 'Mãe', 'Filho(a)', 'Filho(a) Adotivo(a)', 'Afilhado(a)', 'Irmão(ã)', 'Tio(a)', 'Sobrinho(a)', 'Padrasto', 'Madrasta', 'Enteado(a)', 'Meio-irmão(ã)', 'Namorado(a)', 'Noivo(a)', 'Ex-Parceiro(a)', 'Avô(ó)', 'Neto(a)'];
-        const defaultBusinessSectors = ['Varejo', 'Alimentação', 'Tecnologia', 'Saúde', 'Educação', 'Serviços', 'Entretenimento', 'Indústria', 'Governamental', 'Finanças', 'Esporte / Clube', 'Hotelaria'];
+        const defaultBusinessSectors = ['Varejo', 'Alimentação', 'Tecnologia', 'Saúde', 'Educação', 'Serviços', 'Entretenimento', 'Indústria', 'Governamental', 'Finanças', 'Esporte / Clube', 'Hotelaria', 'Banco'];
         const politicalSpectrums = ['Direita', 'Centro', 'Esquerda'];
         const defaultMinistries = [{ id: 'prefeito', name: 'Prefeito(a)', fixed: true }];
         const institutionTypes = ['Escola', 'Curso Técnico', 'Universidade', 'Instituto'];
@@ -220,6 +240,15 @@
         const removalOptions = ['Se mudou', 'Morreu', 'Apenas remover'];
         const businessRemovalOptions = ['Apenas Remoção', 'Falência', 'Encerramento'];
         const lawRemovalReasons = ['Apenas Remoção', 'Revogada', 'Vetada', 'Expirada'];
+
+        function getSocialClass(balance) {
+            if (balance < 0) return { label: 'Devedor', color: 'bg-black' };
+            if (balance < 1000) return { label: 'Miserável', color: 'bg-red-500' };
+            if (balance < 10000) return { label: 'Pobre', color: 'bg-orange-500' };
+            if (balance < 50000) return { label: 'Classe Média', color: 'bg-blue-500' };
+            if (balance < 200000) return { label: 'Rico', color: 'bg-green-500' };
+            return { label: 'Magnata', color: 'bg-yellow-500' };
+        }
 
         function render() {
             destroyCharts();
@@ -249,6 +278,7 @@
                 case 'register': return RegisterPage();
                 case 'settings': return SettingsPage();
                 case 'regions': return RegionsPage();
+                case 'finance': return FinancePage();
                 case 'census-data': return CensusDataPage();
                 case 'resident-profile': return ResidentProfilePage();
                 case 'business-profile': return BusinessProfilePage();
@@ -301,9 +331,14 @@
             if (sim.governmentRole || (sim.councilRoles && sim.councilRoles.length > 0)) statusIcons += '<i data-lucide="landmark" class="inline-block h-4 w-4 mr-1 text-purple-500"></i>';
             if (sim.education && sim.education.some(e => e.status === 'Cursando')) statusIcons += '<i data-lucide="graduation-cap" class="inline-block h-4 w-4 mr-1 text-green-500"></i>';
             const deceasedTag = sim.isDeceased ? ' <span class="text-[10px] font-extrabold bg-gray-200 text-gray-600 px-1 rounded ml-1">FALECIDO(A)</span>' : "";
+            
+            const hasWallet = !['Bebê', 'Criança', 'Pré-adolescente'].includes(sim.lifeStage);
+            const bal = sim.balance || 0;
+            const balanceStr = (hasWallet && sim.balance !== undefined) ? ` | <span class="${bal < 0 ? 'negative-balance font-bold' : ''}">🪙 ${bal.toLocaleString()}</span>` : "";
+            
             return `<div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color] cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all" data-action="view-profile" data-type="resident" data-id="${sim.id}">
                 <h4 class="font-bold text-lg text-[--sims-green-dark]">${statusIcons}${sim.firstName} ${sim.lastName}${deceasedTag}</h4>
-                <p class="text-sm text-[--text-secondary]">${sim.lifeStage || 'Fase da vida não definida'}</p>
+                <p class="text-sm text-[--text-secondary]">${sim.lifeStage || 'Fase da vida não definida'}${balanceStr}</p>
             </div>`;
         };
 
@@ -311,9 +346,12 @@
             const employeeCount = state.residents.filter(r => !r.isDeceased && r.employment?.some(job => job.businessId === biz.id)).length;
             let subtext = biz.sector;
             if (biz.sector === 'Educação') subtext = biz.institutionType || 'Educação';
+            if (biz.sector === 'Banco') subtext = '🏦 Instituição Financeira';
+            const bal = biz.balance || 0;
+            const balanceStr = biz.balance !== undefined ? ` | <span class="${bal < 0 ? 'negative-balance font-bold' : ''}">🪙 ${bal.toLocaleString()}</span>` : "";
             return `<div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color] cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all" data-action="view-profile" data-type="business" data-id="${biz.id}">
                 <h4 class="font-bold text-lg text-[--sims-green-dark]">${biz.name}</h4>
-                <p class="text-sm text-[--text-secondary]">${subtext}</p>
+                <p class="text-sm text-[--text-secondary]">${subtext}${balanceStr}</p>
                 <p class="text-xs text-[--text-secondary] mt-2 pt-2 border-t border-[--border-color]">Funcionários: ${employeeCount}</p>
             </div>`;
         };
@@ -392,21 +430,149 @@
                 <header class="mb-6">${HeaderComponent('Mais Opções', 'Explore outras áreas da sua cidade.', currentVersion)}</header>
                 <div class="grid grid-cols-2 gap-4">
                     <button data-action="navigate" data-page="politics" class="bg-[--card-bg] p-6 rounded-lg shadow-sm border border-[--border-color] flex flex-col items-center justify-center aspect-square hover:shadow-lg hover:-translate-y-1 transition-all"><i data-lucide="scale" class="h-10 w-10 mb-2 text-[--sims-green-vibrant]"></i><span class="font-semibold text-center">Política</span></button>
+                    <button data-action="navigate" data-page="finance" class="bg-[--card-bg] p-6 rounded-lg shadow-sm border border-[--border-color] flex flex-col items-center justify-center aspect-square hover:shadow-lg hover:-translate-y-1 transition-all"><i data-lucide="landmark" class="h-10 w-10 mb-2 text-[--finance-gold]"></i><span class="font-semibold text-center">Banco Central</span></button>
                     <button data-action="navigate" data-page="register" class="bg-[--card-bg] p-6 rounded-lg shadow-sm border border-[--border-color] flex flex-col items-center justify-center aspect-square hover:shadow-lg hover:-translate-y-1 transition-all"><i data-lucide="file-text" class="h-10 w-10 mb-2 text-[--sims-green-vibrant]"></i><span class="font-semibold text-center">Registro</span></button>
                     <button data-action="navigate" data-page="settings" class="bg-[--card-bg] p-6 rounded-lg shadow-sm border border-[--border-color] flex flex-col items-center justify-center aspect-square hover:shadow-lg hover:-translate-y-1 transition-all"><i data-lucide="settings" class="h-10 w-10 mb-2 text-[--sims-green-vibrant]"></i><span class="font-semibold text-center">Configurações</span></button>
+                </div>
+                <div class="grid grid-cols-2 gap-4 mt-4">
                     <button data-action="navigate" data-page="regions" class="bg-[--card-bg] p-6 rounded-lg shadow-sm border border-[--border-color] flex flex-col items-center justify-center aspect-square hover:shadow-lg hover:-translate-y-1 transition-all"><i data-lucide="map-pinned" class="h-10 w-10 mb-2 text-[--sims-green-vibrant]"></i><span class="font-semibold text-center">Regiões</span></button>
+                    <button data-action="navigate" data-page="census-data" class="bg-[--card-bg] p-6 rounded-lg shadow-sm border border-[--border-color] flex flex-col items-center justify-center aspect-square hover:shadow-lg hover:-translate-y-1 transition-all"><i data-lucide="pie-chart" class="h-10 w-10 mb-2 text-[--sims-green-vibrant]"></i><span class="font-semibold text-center">Censo</span></button>
                 </div>
-                <div class="mt-4">
-                    <button data-action="navigate" data-page="census-data" class="w-full bg-[--card-bg] p-6 rounded-lg shadow-sm border border-[--border-color] flex items-center justify-center gap-4 hover:shadow-lg hover:-translate-y-1 transition-all">
-                        <i data-lucide="pie-chart" class="h-10 w-10 text-[--sims-green-vibrant]"></i>
-                        <span class="font-semibold text-center text-lg">Dados de Censo</span>
-                    </button>
+            </div>`;
+        }
+
+        function FinancePage() {
+            const lastCycleDate = state.financeConfig.lastCycle ? new Date(state.financeConfig.lastCycle.seconds * 1000).toLocaleString('pt-BR') : 'Nunca processado';
+            
+            const taxesResident = state.taxes.filter(t => t.category === 'resident');
+            const taxesBusiness = state.taxes.filter(t => t.category === 'business');
+
+            const taxListHTML = (taxes) => taxes.length > 0 ? taxes.map(t => `
+                <div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color] mb-2">
+                    <div>
+                        <p class="font-semibold">${t.name}</p>
+                        <p class="text-xs text-[--text-secondary]">${t.rate}%</p>
+                    </div>
+                    <div class="flex gap-1">
+                        <button data-action="open-modal" data-modal-type="edit-tax" data-id="${t.id}" class="text-blue-500 p-1"><i data-lucide="edit-3" class="h-4 w-4"></i></button>
+                        <button data-action="delete-tax" data-id="${t.id}" class="text-red-500 p-1"><i data-lucide="trash-2" class="h-4 w-4"></i></button>
+                    </div>
                 </div>
+            `).join("") : '<p class="text-xs italic text-[--text-secondary] text-center py-2">Nenhum imposto definido.</p>';
+
+            const specialTaxesHTML = state.specialTaxes.map(st => {
+                return `
+                <div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color] mb-2">
+                    <div>
+                        <p class="font-semibold">${st.name} <span class="text-[--finance-gold] ml-1">${st.rate}%</span></p>
+                        <p class="text-[10px] text-[--text-secondary]">Contribuintes: ${st.targetIds?.length || 0}</p>
+                    </div>
+                    <button data-action="delete-special-tax" data-id="${st.id}" class="text-red-500 p-1"><i data-lucide="trash-2" class="h-4 w-4"></i></button>
+                </div>`;
+            }).join("");
+
+            const deceasedWithBalance = state.residents.filter(r => r.isDeceased && (r.balance || 0) > 0);
+            const inheritanceHTML = deceasedWithBalance.map(r => `
+                <div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color] mb-2">
+                    <div>
+                        <p class="font-bold">${r.firstName} ${r.lastName}</p>
+                        <p class="text-xs text-[--danger-text]">Saldo Pendente: 🪙 ${r.balance.toLocaleString()}</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button data-action="open-modal" data-modal-type="transfer-inheritance" data-id="${r.id}" class="bg-[--sims-green-dark] text-white text-[10px] px-2 py-1 rounded font-bold">Transferir</button>
+                        <button data-action="extinguish-balance" data-id="${r.id}" class="bg-gray-500 text-white text-[10px] px-2 py-1 rounded font-bold">Extinguir</button>
+                    </div>
+                </div>
+            `).join("");
+
+            return `<div class="page-content p-4 md:p-6 space-y-8">
+                <header>${HeaderComponent('Banco Central', 'Controle financeiro e tributário.', currentVersion)}</header>
+                
+                <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-[--card-bg] p-6 rounded-xl shadow-sm border border-[--border-color] flex flex-col items-center justify-center text-center">
+                        <p class="text-sm font-bold text-[--text-secondary] uppercase tracking-wider mb-2">Dinheiro em Circulação</p>
+                        <h2 class="text-4xl font-extrabold text-[--finance-gold]">🪙 ${state.financeConfig.totalCirculating.toLocaleString()}</h2>
+                        <p class="text-[10px] text-gray-400 mt-2 uppercase font-bold">Total nos saldos de Moradores e Empresas</p>
+                    </div>
+                    <div class="bg-[--card-bg] p-6 rounded-xl shadow-sm border border-[--border-color]">
+                        <p class="text-sm font-bold text-[--text-secondary] uppercase tracking-wider mb-4">Ciclo Econômico</p>
+                        <div class="space-y-4">
+                            <div>
+                                <p class="text-xs text-[--text-secondary]">Última Virada:</p>
+                                <p class="font-mono text-sm">${lastCycleDate}</p>
+                            </div>
+                            <button data-action="process-finance-cycle" class="w-full bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold hover:bg-opacity-90 transition flex items-center justify-center gap-2">
+                                <i data-lucide="refresh-cw" class="h-5 w-5"></i> Processar Ciclo Financeiro
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="bg-[--card-bg] p-6 rounded-xl shadow-sm border border-[--border-color]">
+                    <h2 class="text-xl font-bold text-[--sims-green-dark] mb-4 flex items-center gap-2"><i data-lucide="trending-down"></i> Padrão de Vida (Gastos Globais)</h2>
+                    <form id="global-finance-form" data-action="save-global-finance" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${createFormInput('costOfLiving', 'Custo de Vida Global (%)', state.financeConfig.costOfLiving || 0, 'number')}
+                        ${createFormInput('foodTax', 'Taxa de Alimentação (%)', state.financeConfig.foodTax || 0, 'number')}
+                        <button type="submit" class="md:col-span-2 bg-[--sims-green-vibrant] text-[--sims-green-dark] font-bold py-2 rounded-lg">Salvar Configurações de Gastos</button>
+                    </form>
+                </section>
+
+                <section class="space-y-6">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-semibold text-[--sims-green-dark]">Gestão de Impostos</h2>
+                        <button data-action="open-modal" data-modal-type="add-tax" class="bg-[--finance-gold] text-white px-4 py-2 rounded-lg font-bold text-sm">+ Novo Imposto</button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <h3 class="font-bold text-sm text-[--text-secondary] uppercase mb-3 flex items-center gap-2">
+                                <i data-lucide="user" class="h-4 w-4"></i> Impostos sobre Moradores
+                            </h3>
+                            ${taxListHTML(taxesResident)}
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-sm text-[--text-secondary] uppercase mb-3 flex items-center gap-2">
+                                <i data-lucide="building-2" class="h-4 w-4"></i> Impostos sobre Empresas
+                            </h3>
+                            ${taxListHTML(taxesBusiness)}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-semibold text-[--sims-green-dark]">Impostos Especiais</h2>
+                        <button data-action="open-modal" data-modal-type="add-special-tax" class="bg-[--danger-text] text-white px-4 py-2 rounded-lg font-bold text-sm">+ Criar Imposto Especial</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${specialTaxesHTML || '<p class="text-sm italic text-[--text-secondary] py-4 col-span-full text-center">Nenhum imposto especial registrado.</p>'}
+                    </div>
+                </section>
+
+                <section class="space-y-4">
+                    <h2 class="text-2xl font-semibold text-[--sims-green-dark]">Sucessão e Herança</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${inheritanceHTML || '<p class="text-sm italic text-[--text-secondary] py-4 col-span-full text-center">Nenhum espólio pendente para partilha.</p>'}
+                    </div>
+                </section>
             </div>`;
         }
 
         function PoliticsPage() {
             const ministries = [...defaultMinistries, ...(state.government.ministries || [])];
+            
+            // Área de Gestão de Salários
+            const salaryHTML = ministries.map(min => {
+                const salValue = state.government.salaries?.[min.id] || 0;
+                return `<div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color] mb-2">
+                    <div><p class="font-semibold text-sm">${min.name}</p></div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-bold text-[--finance-gold]">🪙 ${salValue.toLocaleString()}</span>
+                        <button data-action="open-modal" data-modal-type="edit-gov-salary" data-office-id="${min.id}" data-office-name="${min.name}" class="text-blue-500 p-1"><i data-lucide="edit-3" class="h-4 w-4"></i></button>
+                    </div>
+                </div>`;
+            }).join("");
+
             const governmentHTML = ministries.map(min => {
                 const holder = state.residents.find(r => r.id === state.government.roles?.[min.id]);
                 const buttonHTML = holder ? `<button data-action="open-modal" data-modal-type="remove-minister-reason" data-office-id="${min.id}" data-office-name="${min.name}" data-resident-id="${holder.id}" class="text-sm bg-[--danger-bg] text-[--danger-text] px-3 py-1 rounded-md hover:bg-opacity-80 transition">Remover</button>` : `<button data-action="open-modal" data-modal-type="appoint-minister" data-office-id="${min.id}" data-office-name="${min.name}" class="text-sm bg-[--border-color] text-[--text-primary] px-3 py-1 rounded-md hover:bg-opacity-80 transition">Nomear</button>`;
@@ -498,17 +664,26 @@
 
             return `<div class="page-content p-4 md:p-6 space-y-8">
                 <header>${HeaderComponent('Cenário Político', 'Gerencie o governo e os partidos.', currentVersion)}</header>
+                
                 <section>
                     <div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-semibold text-[--sims-green-dark]">Poder Executivo</h2><button data-action="open-modal" data-modal-type="manage-ministries" class="text-sm bg-[--border-color] text-[--text-primary] px-3 py-1 rounded-md hover:bg-opacity-80 transition">Gerenciar</button></div>
                     <div class="space-y-2">${governmentHTML}</div>
                 </section>
+
+                <section class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]">
+                    <h2 class="text-xl font-bold text-[--sims-green-dark] mb-4 flex items-center gap-2"><i data-lucide="banknote"></i> Salários do Executivo</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        ${salaryHTML}
+                    </div>
+                </section>
+
                 <section>
                     <div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-semibold text-[--sims-green-dark]">Conselhos</h2><button data-action="open-modal" data-modal-type="add-council" class="text-sm bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full font-semibold hover:bg-green-500 flex items-center gap-1"><i data-lucide="plus" class="h-4 w-4"></i> Criar</button></div>
                     <div id="councils-list-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
                 </section>
                 <section>
                      <div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-semibold text-[--sims-green-dark]">Legislação Municipal</h2><button data-action="open-modal" data-modal-type="add-law" class="text-sm bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full font-semibold hover:bg-green-500 flex items-center gap-1"><i data-lucide="scroll-text" class="h-4 w-4"></i> Nova Lei</button></div>
-                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${lawsHTML || '<p class="text-center italic text-[--text-secondary] py-4 col-span-full">Nenhuma lei registrada.</p>'}</div>
+                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${lawsHTML || '<p class="text-center italic text-[--text-secondary] py-4 col-span-full">Nenhuma lei registrada.</p'}</div>
                 </section>
                 <section>
                     <h2 class="text-2xl font-semibold text-[--sims-green-dark] mb-4">Eleições</h2>
@@ -534,6 +709,7 @@
                     <button data-action="generate-report" data-report-type="businesses" class="bg-[--sims-green-dark] text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-opacity-90 transition"><i data-lucide="building-2"></i> Relatório de Empresas</button>
                     <button data-action="generate-report" data-report-type="politics" class="bg-[--sims-green-dark] text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-opacity-90 transition"><i data-lucide="landmark"></i> Relatório Político</button>
                     <button data-action="generate-report" data-report-type="obituary" class="bg-[--danger-text] text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-opacity-90 transition"><i data-lucide="skull"></i> Obituário Oficial</button>
+                    <button data-action="generate-report" data-report-type="finance-transparency" class="bg-[--finance-gold] text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-opacity-90 transition col-span-full md:col-span-1"><i data-lucide="banknote"></i> Transparência Financeira</button>
                 </div>
                 <div id="report-output" class="hidden mt-6">
                     <h2 class="text-2xl font-semibold text-[--sims-green-dark] mb-4">Relatório Gerado</h2>
@@ -575,9 +751,22 @@
             const recordLimit = 50000;
             const usagePercentage = Math.min((totalRecords / recordLimit) * 100, 100);
             const residentListHTML = state.residents.map(r => `<div class="flex justify-between items-center p-2 hover:bg-[--border-color] rounded-md"><span>${r.firstName} ${r.lastName} ${r.isDeceased ? '(†)' : ''}</span><button data-action="open-modal" data-modal-type="confirm-removal" data-id="${r.id}" class="text-red-500 hover:text-red-700 p-1"><i data-lucide="trash-2" class="h-4 w-4"></i></button></div>`).join("");
+            
             return `<div class="page-content p-4 md:p-6 space-y-8">
                 <header><button data-action="navigate" data-page="more" class="flex items-center text-sm text-[--sims-green-dark] font-semibold mb-4 hover:underline"><i data-lucide="arrow-left" class="h-4 w-4 mr-2"></i> Voltar para Mais</button>${HeaderComponent('Configurações', 'Gerencie seu aplicativo e dados.', currentVersion)}</header>
+                
                 <section class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><h3 class="font-bold text-lg mb-2">Uso de Dados</h3><div class="w-full bg-[--border-color] rounded-full h-2.5 mb-2"><div class="bg-[--sims-green-vibrant] h-2.5 rounded-full" style="width: ${usagePercentage}%"></div></div><p class="text-right text-sm font-medium text-[--text-secondary]">${totalRecords} Registros</p></section>
+                
+                <section class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-4"><h3 class="font-bold text-lg">Gastos Fixos Padrão</h3><button data-action="open-modal" data-modal-type="manage-fixed-expenses-list" class="bg-[--sims-green-dark] text-white text-xs px-3 py-1 rounded-md">Configurar Lista</button></div><div class="space-y-2">${state.fixedExpensesList.map(e => `<p class="text-sm bg-[--bg-color] p-2 rounded border border-[--border-color]">${e.name} (🪙 ${e.value})</p>`).join("") || '<p class="text-xs italic text-[--text-secondary]">Nenhum gasto padrão cadastrado.</p>'}</div></section>
+                
+                <section class="bg-[--card-bg] p-6 rounded-xl border border-[--border-color] space-y-4">
+                    <h3 class="font-bold text-lg text-[--sims-green-dark]">Comandos de Sistema</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <button data-action="open-modal" data-modal-type="confirm-zero-balances" class="w-full bg-orange-500 text-white font-bold py-4 rounded-lg shadow hover:bg-orange-600 transition">Zerar Todos os Saldos</button>
+                        <button data-action="open-modal" data-modal-type="confirm-reset-central-bank" class="w-full bg-red-600 text-white font-bold py-4 rounded-lg shadow hover:bg-red-700 transition">Resetar Banco Central</button>
+                    </div>
+                </section>
+
                 <section class="border-2 border-red-500/50 rounded-lg p-4"><h3 class="font-bold text-lg text-red-500 mb-2">Zona de Perigo</h3><div class="h-64 overflow-y-auto p-2 bg-[--bg-color] rounded-md border border-[--border-color] no-scrollbar">${residentListHTML || '<p class="text-center text-sm italic py-4">Sem registros.</p>'}</div></section>
             </div>`;
         }
@@ -585,7 +774,13 @@
         function ResidentProfilePage() {
             const sim = state.residents.find(r => r.id === state.currentResidentId);
             if (!sim) return ErrorPage('Morador não encontrado.', 'dashboard');
+            
             const deceasedHeader = sim.isDeceased ? `<div class="bg-red-50 text-red-700 p-4 rounded-lg border border-red-200 mb-4 flex items-center gap-3"><i data-lucide="skull"></i> <div><p class="font-bold">FALECIDO(A)</p><p class="text-xs">Falecimento: ${new Date(sim.deathDate?.seconds * 1000).toLocaleDateString('pt-BR')}</p></div></div>` : "";
+            
+            const hasWallet = !['Bebê', 'Criança', 'Pré-adolescente'].includes(sim.lifeStage);
+            const bal = sim.balance || 0;
+            const socialClass = getSocialClass(bal);
+
             const relationshipsHTML = (sim.relationships || []).map((rel, idx) => {
                 const relatedSim = state.residents.find(r => r.id === rel.residentId);
                 const tag = relatedSim?.isDeceased ? ' <span class="text-[10px] font-bold text-red-500 uppercase">(Falecido/a)</span>' : "";
@@ -598,15 +793,24 @@
                     const business = state.businesses.find(b => b.id === job.businessId);
                     const branch = state.branches.find(br => br.id === job.branchId);
                     const localStr = branch ? `na filial <strong>${branch.name}</strong>` : `na <strong>Sede</strong>`;
+                    const salaryStr = job.salary ? ` | 💸 Salário: ${job.salary.toLocaleString()}` : "";
                     return `<div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color]">
-                        <div><p><strong>${job.position}</strong></p><p class="text-sm text-[--text-secondary]">${localStr} de <strong class="text-[--sims-green-dark]">${business ? business.name : 'Empresa Desconhecida'}</strong></p></div>
+                        <div><p><strong>${job.position}${salaryStr}</strong></p><p class="text-sm text-[--text-secondary]">${localStr} de <strong class="text-[--sims-green-dark]">${business ? business.name : 'Empresa Desconhecida'}</strong></p></div>
                         <button data-action="open-modal" data-modal-type="remove-employee-reason" data-resident-id="${sim.id}" data-business-id="${job.businessId}" class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50"><i data-lucide="user-minus" class="h-4 w-4"></i></button>
                     </div>`;
                 }).join("");
             }
 
+            let fixedExpensesHTML = (sim.fixedExpenses || []).map((exp, idx) => {
+                return `<div class="p-2 bg-[--bg-color] rounded border border-[--border-color] flex justify-between items-center"><span>${exp.name}: 🪙 ${exp.value}</span><button data-action="delete-fixed-expense-resident" data-id="${sim.id}" data-index="${idx}" class="text-red-500"><i data-lucide="x" class="h-4 w-4"></i></button></div>`;
+            }).join("");
+
             let politicsHTML = "";
-            if (sim.governmentRole) politicsHTML += `<p><strong class="block text-sm text-[--text-secondary]">Cargo Público:</strong> ${sim.governmentRole}</p>`;
+            if (sim.governmentRole) {
+                const ministryId = Object.keys(state.government.roles).find(k => state.government.roles[k] === sim.id);
+                const sal = state.government.salaries?.[ministryId] || 0;
+                politicsHTML += `<p><strong class="block text-sm text-[--text-secondary]">Cargo Público:</strong> ${sim.governmentRole} <span class="text-xs font-bold text-green-600">(Salário: 🪙 ${sal.toLocaleString()})</span></p>`;
+            }
             if (sim.councilRoles && sim.councilRoles.length > 0) {
                 sim.councilRoles.forEach(role => {
                     politicsHTML += `<p class="mt-2"><strong class="block text-sm text-[--text-secondary]">${role.role} do(a):</strong> ${role.councilName}</p>`;
@@ -624,8 +828,60 @@
                 return `<div class="p-3 bg-[--bg-color] rounded-md border border-[--border-color]"><p class="font-semibold">${edu.course}</p><p class="text-sm text-[--text-secondary]">${business ? business.name : 'Instituição Desconhecida'}</p><p class="text-xs font-bold uppercase mt-2 ${edu.status === 'Cursando' ? 'text-blue-500' : edu.status === 'Formado(a)' ? 'text-green-500' : 'text-red-500'}">${edu.status}</p></div>`;
             }).join("");
 
+            // Seção de Empréstimos
+            const myLoans = state.loans.filter(l => l.borrowerId === sim.id);
+            const loansHTML = myLoans.map(loan => {
+                const bank = state.businesses.find(b => b.id === loan.bankId);
+                return `<div class="p-3 bg-[--bg-color] rounded-md border border-[--border-color] mb-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-bold text-sm">${bank?.name || 'Banco'}</span>
+                        <span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">🪙 ${loan.remainingAmount.toLocaleString()} pendente</span>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-[--text-secondary] uppercase font-bold">
+                        <span>Parcelas: ${loan.currentInstallment}/${loan.totalInstallments}</span>
+                        <span>Juros: ${loan.interestRate}%</span>
+                    </div>
+                </div>`;
+            }).join("");
+
             const history = (sim.history || []).sort((a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0));
             const historyHTML = history.map(entry => `<div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color]"><div><p><strong>${entry.status}</strong></p><p class="text-sm text-[--text-secondary]">${entry.type === 'job' ? 'da empresa' : 'do cargo de'} <strong>${entry.location}</strong></p></div><button data-action="delete-history-entry" data-resident-id="${sim.id}" data-history-id="${entry.id}" class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50"><i data-lucide="trash-2" class="h-4 w-4"></i></button></div>`).join("");
+
+            let financeSectionHTML = "";
+            if (hasWallet) {
+                financeSectionHTML = `
+                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]">
+                    <h3 class="font-semibold text-lg mb-4 flex items-center gap-2"><i data-lucide="wallet" class="h-5 w-5 text-[--finance-gold]"></i> Finanças Pessoais</h3>
+                    <div class="flex items-center justify-between mb-4 p-3 bg-[--bg-color] rounded-lg">
+                        <div>
+                            <p class="text-xs text-[--text-secondary] uppercase font-bold tracking-wider">Saldo Atual</p>
+                            <p class="text-2xl font-black ${bal < 0 ? 'negative-balance' : 'text-[--sims-green-dark]'}">🪙 ${bal.toLocaleString()}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-xs text-[--text-secondary] uppercase font-bold tracking-wider">Classe Social</p>
+                            <span class="inline-block px-3 py-1 rounded-full text-white text-[10px] font-bold uppercase ${socialClass.color}">${socialClass.label}</span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-6">
+                        <button data-action="open-modal" data-modal-type="inject-capital" data-id="${sim.id}" class="bg-green-100 text-green-700 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 hover:bg-green-200 transition">
+                            <i data-lucide="trending-up" class="h-4 w-4"></i> Injetar Capital
+                        </button>
+                        <button data-action="open-modal" data-modal-type="register-expense" data-id="${sim.id}" class="bg-red-100 text-red-700 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 hover:bg-red-200 transition">
+                            <i data-lucide="trending-down" class="h-4 w-4"></i> Registrar Gasto
+                        </button>
+                    </div>
+
+                    <div class="border-t border-[--border-color] pt-4 mb-4">
+                        <div class="flex justify-between items-center mb-3"><h4 class="text-sm font-bold uppercase text-[--text-secondary]">Empréstimos Ativos</h4></div>
+                        <div class="space-y-1">${loansHTML || '<p class="text-xs italic text-gray-400">Nenhum empréstimo ativo.</p>'}</div>
+                    </div>
+
+                    <div class="border-t border-[--border-color] pt-4">
+                        <div class="flex justify-between items-center mb-3"><h4 class="text-sm font-bold uppercase text-[--text-secondary]">Gastos Fixos (Ciclo)</h4><button data-action="open-modal" data-modal-type="add-fixed-expense-resident" data-id="${sim.id}" class="text-[--sims-green-dark] font-bold text-xs flex items-center gap-1"><i data-lucide="plus" class="h-3 w-3"></i> Adicionar</button></div>
+                        <div class="space-y-1">${fixedExpensesHTML || '<p class="text-xs italic text-gray-400">Nenhum gasto fixo cadastrado.</p>'}</div>
+                    </div>
+                </div>`;
+            }
 
             return `<div class="page-content p-4 md:p-6 space-y-6">
                 <div><button data-action="navigate" data-page="dashboard" class="flex items-center text-sm text-[--sims-green-dark] font-semibold mb-4 hover:underline"><i data-lucide="arrow-left" class="h-4 w-4 mr-2"></i> Voltar para a lista</button>
@@ -637,12 +893,20 @@
                         <button data-action="open-modal" data-modal-type="confirm-removal" data-id="${sim.id}" class="bg-[--danger-bg] text-[--danger-text] p-2 rounded-lg text-sm font-semibold hover:bg-red-200 dark:hover:bg-red-800/50 transition"><i data-lucide="trash-2" class="h-5 w-5"></i></button>
                     </div>
                 </div></div>
-                <div class="grid grid-cols-2 gap-4"><div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Gênero</strong> ${sim.gender}</div><div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Etnia</strong> ${sim.ethnicity || 'Não definida'}</div><div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color] col-span-2"><strong class="block text-sm text-[--text-secondary]">Região</strong> ${region ? region.name : 'Não especificada'}</div></div>
+                
+                ${financeSectionHTML}
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Gênero</strong> ${sim.gender}</div>
+                    <div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Etnia</strong> ${sim.ethnicity || 'Não definida'}</div>
+                    <div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color] col-span-2"><strong class="block text-sm text-[--text-secondary]">Região</strong> ${region ? region.name : 'Não especificada'}</div>
+                </div>
+                
                 <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Ocupações</h3>${!sim.isDeceased ? `<button data-action="open-modal" data-modal-type="add-job" data-id="${sim.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 transition"><i data-lucide="plus" class="h-4 w-4"></i> Adicionar</button>` : ""}</div><div class="space-y-2">${employmentHTML}</div></div>
                 ${(sim.education && sim.education.length > 0) ? `<div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Educação</h3><div class="space-y-2">${educationHTML}</div></div>` : ""}
                 <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Vida Política</h3>${politicsHTML}</div>
                 <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Histórico</h3><div class="space-y-2">${historyHTML.length ? historyHTML : '<p class="text-[--text-secondary] italic text-center py-4">Nenhum histórico profissional ou político.</p'}</div></div>
-                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Relações</h3><button data-action="open-modal" data-modal-type="add-relationship" data-id="${sim.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 flex items-center gap-1 transition"><i data-lucide="plus" class="h-4 w-4"></i> Adicionar</button></div><div class="space-y-2">${relationshipsHTML.length ? relationshipsHTML : '<p class="text-[--text-secondary] italic text-center py-4">Nenhuma relação cadastrada.</p>'}</div></div>
+                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Relações</h3><button data-action="open-modal" data-modal-type="add-relationship" data-id="${sim.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 flex items-center gap-1 transition"><i data-lucide="plus" class="h-4 w-4"></i> Adicionar</button></div><div class="space-y-2">${relationshipsHTML.length ? relationshipsHTML : '<p class="text-[--text-secondary] italic text-center py-4">Nenhuma relação cadastrada.</p. his'}</div></div>
             </div>`;
         }
 
@@ -653,11 +917,56 @@
             const region = state.regions.find(r => r.id === biz.regionId);
             const myBranches = state.branches.filter(br => br.parentBusinessId === biz.id);
             const employees = state.residents.filter(r => !r.isDeceased && r.employment?.some(job => job.businessId === biz.id && !job.branchId));
+            
+            const totalSalaries = state.residents.filter(r => !r.isDeceased && r.employment?.some(j => j.businessId === biz.id))
+                                .reduce((acc, r) => acc + r.employment.filter(j => j.businessId === biz.id).reduce((s, j) => s + (j.salary || 0), 0), 0);
+
             const branchesHTML = myBranches.map(br => `<div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color] cursor-pointer hover:shadow-md" data-action="view-profile" data-type="branch" data-id="${br.id}"><div><p class="font-semibold">${br.name}</p><p class="text-[10px] text-[--text-secondary] uppercase">Unidade / Filial</p></div><i data-lucide="chevron-right" class="h-4 w-4"></i></div>`).join("");
             const employeesHTML = employees.map(emp => {
                 const job = emp.employment.find(j => j.businessId === biz.id && !j.branchId);
-                return `<div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color]"><div><p class="font-semibold">${emp.firstName} ${emp.lastName}</p><p class="text-sm text-[--text-secondary]">${job.position}</p></div><button data-action="open-modal" data-modal-type="remove-employee-reason" data-resident-id="${emp.id}" data-business-id="${biz.id}" class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50"><i data-lucide="user-minus" class="h-4 w-4"></i></button></div>`;
+                const salaryStr = job.salary ? ` (💰 ${job.salary.toLocaleString()})` : " (💰 0)";
+                return `<div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color]">
+                    <div>
+                        <p class="font-semibold">${emp.firstName} ${emp.lastName}</p>
+                        <p class="text-sm text-[--text-secondary]">${job.position}${salaryStr}</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button data-action="open-modal" data-modal-type="edit-job-salary" data-resident-id="${emp.id}" data-business-id="${biz.id}" class="text-blue-500 hover:bg-blue-100 p-2 rounded-full"><i data-lucide="edit-3" class="h-4 w-4"></i></button>
+                        <button data-action="open-modal" data-modal-type="remove-employee-reason" data-resident-id="${emp.id}" data-business-id="${biz.id}" class="text-red-500 hover:text-red-700 p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50"><i data-lucide="user-minus" class="h-4 w-4"></i></button>
+                    </div>
+                </div>`;
             }).join("");
+
+            let fixedExpensesHTML = (biz.fixedExpenses || []).map((exp, idx) => {
+                return `<div class="p-2 bg-[--bg-color] rounded border border-[--border-color] flex justify-between items-center"><span>${exp.name}: 🪙 ${exp.value}</span><button data-action="delete-fixed-expense-business" data-id="${biz.id}" data-index="${idx}" class="text-red-500"><i data-lucide="x" class="h-4 w-4"></i></button></div>`;
+            }).join("");
+
+            // Seção Especial para Banco
+            let bankSectionHTML = "";
+            if (biz.sector === 'Banco') {
+                const bankLoans = state.loans.filter(l => l.bankId === biz.id);
+                const loansListHTML = bankLoans.map(loan => {
+                    const borrower = state.residents.find(r => r.id === loan.borrowerId) || state.businesses.find(b => b.id === loan.borrowerId);
+                    return `<div class="p-3 bg-[--bg-color] rounded-md border border-[--border-color] mb-2">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-sm">${borrower ? (borrower.firstName ? `${borrower.firstName} ${borrower.lastName}` : borrower.name) : 'Desconhecido'}</span>
+                            <span class="text-xs font-black text-green-600">🪙 ${loan.remainingAmount.toLocaleString()}</span>
+                        </div>
+                        <div class="text-[10px] text-[--text-secondary] mt-1">Parcela ${loan.currentInstallment}/${loan.totalInstallments} | Taxa: ${loan.interestRate}%</div>
+                    </div>`;
+                }).join("");
+
+                bankSectionHTML = `
+                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-lg text-[--finance-gold] flex items-center gap-2"><i data-lucide="landmark"></i> Gestão de Empréstimos</h3>
+                        <button data-action="open-modal" data-modal-type="create-loan" data-id="${biz.id}" class="bg-[--finance-gold] text-white text-xs px-3 py-1 rounded-md font-bold">+ Conceder</button>
+                    </div>
+                    <div class="space-y-2">
+                        ${loansListHTML || '<p class="text-xs italic text-gray-400 text-center py-2">Nenhum empréstimo ativo neste banco.</p>'}
+                    </div>
+                </div>`;
+            }
 
             let educationSectionHTML = "";
             if (biz.sector === 'Educação') {
@@ -668,6 +977,8 @@
                 educationSectionHTML = `<div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-4"><h3 class="font-semibold text-lg">Alunos</h3><button data-action="open-modal" data-modal-type="add-student" data-id="${biz.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 transition">+ Matricular</button></div><div class="flex border-b border-[--border-color] mb-4"><button data-action="set-student-tab" data-tab="ativos" class="tab-btn py-2 px-4 text-sm font-semibold transition ${state.activeStudentTab === 'ativos' ? 'active' : 'text-[--text-secondary]'}">Ativos (${activeStudents.length})</button><button data-action="set-student-tab" data-tab="formados" class="tab-btn py-2 px-4 text-sm font-semibold transition ${state.activeStudentTab === 'formados' ? 'active' : 'text-[--text-secondary]'}">Formados (${graduatedStudents.length})</button></div><div class="space-y-2">${currentList.length ? currentList.map(stu => `<div class="p-3 bg-[--bg-color] rounded-md flex justify-between items-center border border-[--border-color]"><div><p class="font-semibold">${stu.firstName} ${stu.lastName}</p><p class="text-xs text-[--text-secondary]">${stu.education.find(e => e.businessId === biz.id).course}</p></div><button data-action="remove-student" data-resident-id="${stu.id}" data-business-id="${biz.id}" class="text-red-500"><i data-lucide="user-minus" class="h-4 w-4"></i></button></div>`).join("") : '<p class="text-center italic py-4">Nenhum aluno.</p>'}</div></div>`;
             }
 
+            const bal = biz.balance || 0;
+
             return `<div class="page-content p-4 md:p-6 space-y-6">
                 <div><button data-action="navigate" data-page="businesses" class="flex items-center text-sm text-[--sims-green-dark] font-semibold mb-4 hover:underline"><i data-lucide="arrow-left" class="h-4 w-4 mr-2"></i> Voltar para a lista</button>
                 <div class="flex justify-between items-start">
@@ -677,9 +988,47 @@
                         <button data-action="open-modal" data-modal-type="confirm-delete-business" data-id="${biz.id}" class="bg-[--danger-bg] text-[--danger-text] p-2 rounded-lg text-sm font-semibold hover:bg-red-200 transition"><i data-lucide="trash-2" class="h-5 w-5"></i></button>
                     </div>
                 </div></div>
-                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Informações</h3>${biz.sector === 'Educação' ? `<button data-action="open-modal" data-modal-type="manage-courses" data-id="${biz.id}" class="text-sm bg-[--border-color] text-[--text-primary] px-3 py-1 rounded-md hover:bg-opacity-80 transition">Gerenciar Cursos</button>` : ""}</div><p><strong class="block text-sm text-[--text-secondary]">Proprietário(a):</strong> ${owner ? `${owner.firstName} ${owner.lastName}` : 'Pública'}</p><p class="mt-2"><strong class="block text-sm text-[--text-secondary]">Região:</strong> ${region ? region.name : 'Não especificada'}</p></div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]">
+                        <h3 class="font-semibold text-lg mb-4 flex items-center gap-2 text-[--sims-green-dark]"><i data-lucide="landmark" class="h-5 w-5"></i> Finanças da Empresa</h3>
+                        <div class="space-y-4">
+                            <div class="p-3 bg-[--bg-color] rounded-lg">
+                                <p class="text-xs text-[--text-secondary] uppercase font-bold">Saldo Bancário</p>
+                                <p class="text-2xl font-black ${bal < 0 ? 'negative-balance' : 'text-[--sims-green-dark]'}">🪙 ${bal.toLocaleString()}</p>
+                            </div>
+                            <div class="p-3 bg-[--bg-color] rounded-lg">
+                                <p class="text-xs text-[--text-secondary] uppercase font-bold">Folha de Pagamento (Ciclo)</p>
+                                <p class="text-xl font-bold text-red-500">💸 - ${totalSalaries.toLocaleString()}</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-4">
+                             <button data-action="open-modal" data-modal-type="add-manual-revenue" data-id="${biz.id}" class="bg-green-100 text-green-700 py-3 rounded-lg font-bold text-xs flex flex-col items-center justify-center hover:bg-green-200">
+                                <i data-lucide="plus-circle" class="h-5 w-5 mb-1"></i> Registrar Lucro
+                             </button>
+                             <button data-action="open-modal" data-modal-type="add-manual-expense-business" data-id="${biz.id}" class="bg-red-100 text-red-700 py-3 rounded-lg font-bold text-xs flex flex-col items-center justify-center hover:bg-red-200">
+                                <i data-lucide="minus-circle" class="h-5 w-5 mb-1"></i> Registrar Gasto
+                             </button>
+                        </div>
+                    </div>
+
+                    <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]">
+                        <h3 class="font-semibold text-lg mb-4 flex items-center gap-2 text-[--sims-green-dark]"><i data-lucide="info" class="h-5 w-5"></i> Detalhes</h3>
+                        <p><strong class="block text-sm text-[--text-secondary]">Proprietário(a):</strong> ${owner ? `${owner.firstName} ${owner.lastName}` : 'Pública'}</p>
+                        <p class="mt-2"><strong class="block text-sm text-[--text-secondary]">Região:</strong> ${region ? region.name : 'Não especificada'}</p>
+                        ${biz.sector === 'Educação' ? `<button data-action="open-modal" data-modal-type="manage-courses" data-id="${biz.id}" class="mt-4 w-full text-sm bg-[--border-color] text-[--text-primary] px-3 py-2 rounded-md hover:bg-opacity-80 transition font-bold">Gerenciar Cursos</button>` : ""}
+                        
+                        <div class="mt-4 pt-4 border-t border-[--border-color]">
+                            <div class="flex justify-between items-center mb-2"><h4 class="text-xs font-bold uppercase text-[--text-secondary]">Gastos Fixos</h4><button data-action="open-modal" data-modal-type="add-fixed-expense-business" data-id="${biz.id}" class="text-[--sims-green-dark] font-bold text-[10px]">+ Add</button></div>
+                            <div class="space-y-1">${fixedExpensesHTML || '<p class="text-[10px] italic text-gray-400">Nenhum.</p'}</div>
+                        </div>
+                    </div>
+                </div>
+
+                ${bankSectionHTML}
+
                 <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-3"><h3 class="font-semibold text-lg text-[--sims-green-dark]">Unidades e Filiais</h3><button data-action="open-modal" data-modal-type="add-branch" data-id="${biz.id}" class="bg-[--sims-green-dark] text-white px-3 py-1 rounded-full text-xs font-bold">+ Adicionar Unidade</button></div><div class="space-y-2">${branchesHTML || '<p class="text-sm italic text-[--text-secondary] text-center py-2">Nenhuma filial cadastrada.</p'}</div></div>
-                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Funcionários (Sede)</h3><button data-action="open-modal" data-modal-type="add-employee" data-id="${biz.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 transition"><i data-lucide="user-plus" class="h-4 w-4"></i> Contratar</button></div><div class="space-y-2">${employeesHTML || '<p class="text-[--text-secondary] italic text-center py-4">Nenhum funcionário na sede.</p>'}</div></div>
+                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Funcionários (Sede)</h3><button data-action="open-modal" data-modal-type="add-employee" data-id="${biz.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 transition"><i data-lucide="user-plus" class="h-4 w-4"></i> Contratar</button></div><div class="space-y-2">${employeesHTML || '<p class="text-[--text-secondary] italic text-center py-4">Nenhum funcionário na sede.</p. his'}</div></div>
                 ${educationSectionHTML}
             </div>`;
         }
@@ -787,6 +1136,183 @@
             const adultSims = state.residents.filter(r => !r.isDeceased && ['Adulto', 'Idoso'].includes(r.lifeStage)).map(s => ({ value: s.id, text: `${s.firstName} ${s.lastName}` }));
 
             switch (modalType) {
+                case 'edit-gov-salary': {
+                    const { officeId, officeName } = e.target.closest('[data-office-id]').dataset;
+                    const curSal = state.government.salaries?.[officeId] || 0;
+                    title = `Salário: ${officeName}`; formId = 'gov-salary-form'; submitAction = 'update-gov-salary';
+                    contentHTML = `
+                        <p class="mb-4 text-xs text-[--text-secondary]">Defina o valor pago a este cargo em cada ciclo financeiro.</p>
+                        ${createFormInput('salary', 'Valor do Salário (🪙)', curSal, 'number')}
+                        <input type="hidden" name="officeId" value="${officeId}">
+                        <button type="submit" class="w-full bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold">Salvar Salário</button>
+                    `;
+                } break;
+
+                case 'create-loan': {
+                    const bank = state.businesses.find(b => b.id === dataId);
+                    title = 'Conceder Empréstimo'; formId = 'loan-form'; submitAction = 'process-create-loan';
+                    const allBorrowers = [
+                        ...state.residents.filter(r => !r.isDeceased && !['Bebê', 'Criança'].includes(r.lifeStage)).map(r => ({ value: r.id, text: `(Cidadão) ${r.firstName} ${r.lastName}` })),
+                        ...state.businesses.filter(b => b.id !== dataId).map(b => ({ value: b.id, text: `(Empresa) ${b.name}` }))
+                    ];
+                    contentHTML = `
+                        <p class="mb-4 text-xs text-[--text-secondary]">O dinheiro será deduzido do caixa do banco e enviado ao tomador.</p>
+                        ${createFormSelect('borrowerId', 'Tomador do Empréstimo', allBorrowers)}
+                        ${createFormInput('amount', 'Valor Principal (🪙)', "", 'number')}
+                        ${createFormInput('interestRate', 'Taxa de Juros Total (%)', 10, 'number')}
+                        ${createFormInput('installments', 'Número de Parcelas (Ciclos)', 5, 'number')}
+                        <input type="hidden" name="bankId" value="${dataId}">
+                        <button type="submit" class="w-full bg-[--finance-gold] text-white py-3 rounded-lg font-bold">Confirmar Empréstimo</button>
+                    `;
+                } break;
+
+                case 'confirm-zero-balances': {
+                    title = 'Zerar Todos os Saldos'; formId = 'zero-balances-form'; submitAction = 'process-zero-balances';
+                    contentHTML = `<p class="mb-4 text-sm text-[--text-secondary]">Atenção! Esta ação irá zerar o saldo de <strong>todos</strong> os cidadãos e empresas do sistema. Os impostos e cargos não serão afetados.</p><button type="submit" class="w-full bg-orange-600 text-white py-3 rounded-lg font-bold">Sim, Zerar Tudo</button>`;
+                } break;
+
+                case 'confirm-reset-central-bank': {
+                    title = 'Resetar Banco Central'; formId = 'reset-central-bank-form'; submitAction = 'process-reset-central-bank';
+                    contentHTML = `<p class="mb-4 text-sm text-[--text-secondary]">Cuidado! Esta ação irá apagar todos os impostos cadastrados, zerar saldos de moradores/empresas e zerar os salários de todos os empregos.</p><button type="submit" class="w-full bg-red-600 text-white py-3 rounded-lg font-bold">Sim, Reset Completo</button>`;
+                } break;
+
+                case 'transfer-inheritance': {
+                    const deceased = state.residents.find(r => r.id === dataId);
+                    title = 'Partilha de Herança'; formId = 'inheritance-form'; submitAction = 'process-transfer-inheritance';
+                    const list = state.residents.filter(r => !r.isDeceased).map(s => ({ value: s.id, text: `${s.firstName} ${s.lastName}` }));
+                    contentHTML = `
+                        <p class="mb-4 text-sm text-[--text-secondary]">Transferindo saldo de <strong>${deceased.firstName} ${deceased.lastName}</strong> (🪙 ${deceased.balance.toLocaleString()}).</p>
+                        ${createFormSelect('heirId', 'Selecione o Herdeiro', list)}
+                        <input type="hidden" name="deceasedId" value="${dataId}">
+                        <button type="submit" class="w-full bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold">Confirmar Transferência</button>
+                    `;
+                } break;
+
+                case 'manage-fixed-expenses-list': {
+                    title = 'Lista de Gastos Padrão'; formId = 'fixed-list-form'; submitAction = 'save-fixed-expenses-list';
+                    contentHTML = `<div id="fixed-list-container" class="space-y-2 mb-4">
+                        ${state.fixedExpensesList.map((ex, idx) => `
+                            <div class="flex gap-2 items-center bg-[--bg-color] p-2 rounded">
+                                <input type="text" name="fixedName" value="${ex.name}" class="w-1/2 p-2 text-sm border rounded" placeholder="Nome" required>
+                                <input type="number" name="fixedValue" value="${ex.value}" class="w-1/3 p-2 text-sm border rounded" placeholder="Valor" required>
+                                <button type="button" data-action="remove-fixed-row" class="text-red-500"><i data-lucide="trash-2" class="h-4 w-4"></i></button>
+                            </div>
+                        `).join("")}
+                    </div>
+                    <button type="button" data-action="add-fixed-row" class="text-sm font-bold text-blue-500 mb-4">+ Adicionar Item</button>
+                    <button type="submit" class="w-full bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold">Salvar Lista Global</button>`;
+                } break;
+
+                case 'add-fixed-expense-resident': case 'add-fixed-expense-business': {
+                    const isResident = modalType.includes('resident');
+                    title = 'Adicionar Gasto Fixo'; formId = 'fixed-expense-form'; submitAction = modalType;
+                    const checkboxes = state.fixedExpensesList.map((ex, idx) => `
+                        <div class="flex items-center gap-2 p-2 bg-[--bg-color] rounded border border-[--border-color]">
+                            <input type="checkbox" name="selectedFixed" value="${idx}" id="fixed-${idx}" class="w-4 h-4">
+                            <label for="fixed-${idx}" class="text-sm font-medium flex-1">${ex.name} (🪙 ${ex.value})</label>
+                        </div>
+                    `).join("");
+                    contentHTML = `
+                        <p class="text-xs text-[--text-secondary] mb-4">Selecione itens da lista padrão ou crie um personalizado abaixo:</p>
+                        <div class="space-y-2 mb-6 max-h-48 overflow-y-auto">${checkboxes || '<p class="text-center italic text-xs py-2">Lista padrão vazia.</p>'}</div>
+                        <div class="border-t pt-4">
+                            <p class="text-xs font-bold mb-2 uppercase">Ou Criar Manual:</p>
+                            ${createFormInput('customName', 'Nome do Gasto')}
+                            ${createFormInput('customValue', 'Valor (🪙)', 0, 'number')}
+                        </div>
+                        <input type="hidden" name="id" value="${dataId}">
+                        <button type="submit" class="w-full mt-4 bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold">Adicionar Gasto(s)</button>
+                    `;
+                } break;
+
+                case 'add-manual-revenue': {
+                    const biz = state.businesses.find(b => b.id === dataId);
+                    title = 'Registrar Lucro'; formId = 'manual-revenue-form'; submitAction = 'process-manual-revenue';
+                    contentHTML = `
+                        <p class="mb-4 text-sm text-[--text-secondary]">Registrar entrada direta de capital para <strong>${biz.name}</strong>.</p>
+                        ${createFormInput('amount', 'Valor do Serviço/Venda (🪙)', "", 'number')}
+                        <input type="hidden" name="id" value="${dataId}">
+                        <button type="submit" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold">Registrar Entrada</button>
+                    `;
+                } break;
+
+                case 'add-manual-expense-business': {
+                    const biz = state.businesses.find(b => b.id === dataId);
+                    title = 'Registrar Gasto'; formId = 'manual-expense-biz-form'; submitAction = 'process-manual-expense-business';
+                    contentHTML = `
+                        <p class="mb-4 text-sm text-[--text-secondary]">Registrar saída direta de capital de <strong>${biz.name}</strong>.</p>
+                        ${createFormInput('amount', 'Valor do Gasto (🪙)', "", 'number')}
+                        <input type="hidden" name="id" value="${dataId}">
+                        <button type="submit" class="w-full bg-red-600 text-white py-3 rounded-lg font-bold">Registrar Gasto</button>
+                    `;
+                } break;
+
+                case 'add-special-tax': {
+                    title = 'Novo Imposto Especial'; formId = 'special-tax-form'; submitAction = 'save-special-tax';
+                    const residentCheckboxes = state.residents.filter(r => !r.isDeceased).map(r => `
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" name="targetIds" value="${r.id}" id="target-${r.id}" class="w-4 h-4">
+                            <label for="target-${r.id}" class="text-sm">${r.firstName} ${r.lastName}</label>
+                        </div>
+                    `).join("");
+                    contentHTML = `
+                        ${createFormInput('name', 'Nome do Imposto (Ex: Imposto sobre Fortunas)')}
+                        ${createFormInput('rate', 'Alíquota (%)', "", 'number')}
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-1 text-[--text-secondary]">Quem deve pagar?</label>
+                            <div class="max-h-40 overflow-y-auto border p-2 rounded bg-[--bg-color] space-y-1">${residentCheckboxes}</div>
+                        </div>
+                        <button type="submit" class="w-full bg-[--danger-text] text-white py-3 rounded-lg font-bold">Criar e Aplicar</button>
+                    `;
+                } break;
+
+                case 'inject-capital': {
+                    const sim = state.residents.find(r => r.id === dataId);
+                    title = 'Injetar Capital'; formId = 'inject-form'; submitAction = 'process-inject';
+                    contentHTML = `
+                        <p class="mb-4 text-sm text-[--text-secondary]">Adicionar saldo diretamente para <strong>${sim.firstName}</strong>.</p>
+                        ${createFormInput('amount', 'Valor da Injeção (🪙)', "", 'number')}
+                        <input type="hidden" name="id" value="${dataId}">
+                        <button type="submit" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold">Injetar Dinheiro</button>
+                    `;
+                } break;
+
+                case 'register-expense': {
+                    const sim = state.residents.find(r => r.id === dataId);
+                    title = 'Registrar Gasto'; formId = 'expense-form'; submitAction = 'process-expense';
+                    contentHTML = `
+                        <p class="mb-4 text-sm text-[--text-secondary]">Deduzir saldo de <strong>${sim.firstName}</strong>.</p>
+                        ${createFormInput('amount', 'Valor do Gasto (🪙)', "", 'number')}
+                        <input type="hidden" name="id" value="${dataId}">
+                        <button type="submit" class="w-full bg-red-600 text-white py-3 rounded-lg font-bold">Registrar Gasto</button>
+                    `;
+                } break;
+
+                case 'edit-job-salary': {
+                    const { residentId, businessId } = e.target.closest('[data-resident-id]').dataset;
+                    const sim = state.residents.find(r => r.id === residentId);
+                    const job = sim.employment.find(j => j.businessId === businessId);
+                    title = 'Editar Salário'; formId = 'salary-form'; submitAction = 'update-job-salary';
+                    contentHTML = `
+                        <p class="mb-4 text-sm text-[--text-secondary]">Ajuste o salário de <strong>${sim.firstName}</strong> no cargo <strong>${job.position}</strong>.</p>
+                        ${createFormInput('salary', 'Novo Salário do Ciclo (🪙)', job.salary || 0, 'number')}
+                        <input type="hidden" name="residentId" value="${residentId}">
+                        <input type="hidden" name="businessId" value="${businessId}">
+                        <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold">Salvar Novo Salário</button>
+                    `;
+                } break;
+
+                case 'add-tax': case 'edit-tax': {
+                    const tax = state.taxes.find(t => t.id === dataId);
+                    title = tax ? 'Editar Imposto' : 'Novo Imposto'; formId = 'tax-form'; submitAction = modalType;
+                    contentHTML = `
+                        ${createFormInput('name', 'Nome do Imposto', tax?.name || "")}
+                        ${createFormInput('rate', 'Alíquota (%)', tax?.rate || "", 'number')}
+                        ${createFormSelect('category', 'Categoria Aplicada', [{value: 'resident', text: 'Moradores'}, {value: 'business', text: 'Empresas'}], tax?.category)}
+                        <button type="submit" class="w-full mt-4 bg-[--finance-gold] text-white py-3 rounded-lg font-bold">Salvar Imposto</button>
+                    `;
+                } break;
+
                 case 'confirm-delete-business': {
                     const biz = state.businesses.find(b => b.id === dataId);
                     title = `Remover ${biz.name}`; formId = 'delete-business-form'; submitAction = 'process-delete-business';
@@ -871,6 +1397,7 @@
                     contentHTML = `
                         ${createFormInput('firstName', 'Nome', residentToEdit?.firstName || "")}
                         ${createFormInput('lastName', 'Sobrenome', residentToEdit?.lastName || "")}
+                        ${createFormInput('balance', 'Saldo Bancário (🪙)', residentToEdit?.balance || 0, 'number')}
                         ${createFormSelect('lifeStage', 'Fase da Vida', lifeStages.map(v => ({ value: v, text: v })), residentToEdit?.lifeStage)}
                         ${createFormSelect('gender', 'Gênero', genders.map(v => ({ value: v, text: v })), residentToEdit?.gender)}
                         ${createFormSelect('ethnicity', 'Etnia', ethnicities.map(v => ({ value: v, text: v })), residentToEdit?.ethnicity)}
@@ -889,6 +1416,7 @@
 
                     contentHTML = `
                         ${createFormInput('name', 'Nome da Empresa', businessToEdit?.name || "")}
+                        ${createFormInput('balance', 'Saldo Bancário (🪙)', businessToEdit?.balance || 0, 'number')}
                         ${createFormSelect('sector', 'Setor', allSectors.map(v => ({ value: v, text: v })), businessToEdit?.sector)}
                         <div id="dynamic-business-fields"></div>
                         ${createFormSelect('regionId', 'Região', regionOptions, businessToEdit?.regionId || 'null')}
@@ -927,12 +1455,25 @@
                 case 'add-job': {
                     const resident = state.residents.find(r => r.id === dataId);
                     title = `Adicionar Ocupação para ${resident.firstName}`; formId = 'job-form'; submitAction = 'add-job';
-                    contentHTML = `${createFormSelect('businessId', 'Empresa', state.businesses.map(b => ({ value: b.id, text: b.name })))} ${createFormInput('position', 'Cargo/Posição')}<div id="local-select-container"></div><input type="hidden" name="residentId" value="${dataId}"><button type="submit" class="w-full mt-4 bg-[--sims-green-dark] text-white py-3 rounded-lg font-semibold">Confirmar</button>`;
+                    contentHTML = `
+                        ${createFormSelect('businessId', 'Empresa', state.businesses.map(b => ({ value: b.id, text: b.name })))} 
+                        ${createFormInput('position', 'Cargo/Posição')}
+                        ${createFormInput('salary', 'Salário Base do Ciclo (🪙)', 0, 'number')}
+                        <div id="local-select-container"></div>
+                        <input type="hidden" name="residentId" value="${dataId}">
+                        <button type="submit" class="w-full mt-4 bg-[--sims-green-dark] text-white py-3 rounded-lg font-semibold">Confirmar</button>
+                    `;
                 } break;
                 case 'add-employee': case 'add-employee-branch': {
                     title = 'Contratar para Empresa'; formId = 'employee-form'; submitAction = modalType;
                     const candidateSims = state.residents.filter(r => !r.isDeceased).map(s => ({ value: s.id, text: `${s.firstName} ${s.lastName}` }));
-                    contentHTML = `${createFormSelect('residentId', 'Candidato(a)', candidateSims)} ${createFormInput('position', 'Cargo/Posição')}<input type="hidden" name="id" value="${dataId}"><button type="submit" class="w-full mt-4 bg-[--sims-green-dark] text-white py-3 rounded-lg font-semibold hover:bg-opacity-90 transition">Contratar</button>`;
+                    contentHTML = `
+                        ${createFormSelect('residentId', 'Candidato(a)', candidateSims)} 
+                        ${createFormInput('position', 'Cargo/Posição')}
+                        ${createFormInput('salary', 'Salário Base do Ciclo (🪙)', 0, 'number')}
+                        <input type="hidden" name="id" value="${dataId}">
+                        <button type="submit" class="w-full mt-4 bg-[--sims-green-dark] text-white py-3 rounded-lg font-semibold hover:bg-opacity-90 transition">Contratar</button>
+                    `;
                 } break;
                 case 'remove-employee-reason': {
                     const { residentId, businessId } = e.target.closest('[data-resident-id]').dataset;
@@ -1016,10 +1557,8 @@
                     contentHTML = `${createFormSelect('residentId', 'Cidadão', unaffiliated)}<button type="submit" class="w-full mt-4 bg-[--sims-green-dark] text-white py-3 rounded-lg font-semibold">Filiar</button>`;
                 } break;
                 
-                // --- LAW MODALS ---
                 case 'add-law': {
                     title = 'Nova Lei Municipal'; formId = 'law-form'; submitAction = 'add-law';
-                    // Authors: People in government (Roles). Create a list of unique residents holding roles.
                     const roleHoldersIds = [...new Set(Object.values(state.government.roles || {}).filter(Boolean))];
                     const authorities = roleHoldersIds.map(id => {
                         const r = state.residents.find(res => res.id === id);
@@ -1029,7 +1568,6 @@
                     if (authorities.length === 0) {
                         contentHTML = '<p class="text-center py-4">Não há membros no governo para propor leis.</p>';
                     } else {
-                        // For multiselect authors, we use checkboxes
                         const authorsCheckboxes = authorities.map(a => `<div class="flex items-center"><input type="checkbox" name="authorIds" value="${a.value}" id="auth-${a.value}" class="mr-2"><label for="auth-${a.value}">${a.text}</label></div>`).join("");
                         
                         contentHTML = `
@@ -1047,7 +1585,6 @@
                     title = `Remover Lei`; formId = 'remove-law-form'; submitAction = 'process-remove-law';
                     contentHTML = `<p class="mb-4 text-[--text-secondary]">O que aconteceu com a lei "<strong>${law.title}</strong>"?</p>${createReasonRadios('reason', lawRemovalReasons)}<input type="hidden" name="lawId" value="${dataId}"><button type="submit" class="w-full mt-6 bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold">Confirmar</button>`;
                 } break;
-                // ------------------
 
                 case 'confirm-delete': {
                     const { type, id } = e.target.closest('[data-id]').dataset;
@@ -1112,7 +1649,7 @@
             }
         }
 
-        const createFormInput = (id, label, value = "") => `<div class="mb-4"><label for="${id}" class="block text-sm font-medium mb-1 text-[--text-secondary]">${label}</label><input type="text" id="${id}" name="${id}" value="${value}" required class="w-full px-3 py-2 border border-[--border-color] rounded-md bg-[--bg-color] text-[--text-primary] focus:ring-[--sims-green-vibrant] focus:border-[--sims-green-vibrant]"></div>`;
+        const createFormInput = (id, label, value = "", type = "text") => `<div class="mb-4"><label for="${id}" class="block text-sm font-medium mb-1 text-[--text-secondary]">${label}</label><input type="${type}" id="${id}" name="${id}" value="${value}" required class="w-full px-3 py-2 border border-[--border-color] rounded-md bg-[--bg-color] text-[--text-primary] focus:ring-[--sims-green-vibrant] focus:border-[--sims-green-vibrant]"></div>`;
         const createFormSelect = (id, label, options, selectedValue = "") => `<div class="mb-4"><label for="${id}" class="block text-sm font-medium mb-1 text-[--text-secondary]">${label}</label><select id="${id}" name="${id}" required class="w-full px-3 py-2 border border-[--border-color] rounded-md bg-[--bg-color] text-[--text-primary] focus:ring-[--sims-green-vibrant] focus:border-[--sims-green-vibrant]">${options.map(opt => `<option value="${opt.value}" ${String(opt.value) === String(selectedValue) ? 'selected' : ""}>${opt.text}</option>`).join("")}</select></div>`;
 
         function normalizeEmployment(employmentData) {
@@ -1130,28 +1667,157 @@
 
             try {
                 switch (action) {
+                    case 'update-gov-salary': {
+                        const sals = { ...state.government.salaries };
+                        sals[data.officeId] = parseFloat(data.salary || 0);
+                        await setDoc(doc(db, "government", "salaries"), sals);
+                    } break;
+                    case 'process-create-loan': {
+                        const amount = parseFloat(data.amount);
+                        const bankRef = doc(db, "businesses", data.bankId);
+                        const borrowerType = state.residents.some(r => r.id === data.borrowerId) ? 'residents' : 'businesses';
+                        const borrowerRef = doc(db, borrowerType, data.borrowerId);
+                        
+                        const bankDoc = await getDoc(bankRef);
+                        const borrowerDoc = await getDoc(borrowerRef);
+                        
+                        const batch = writeBatch(db);
+                        batch.update(bankRef, { balance: (bankDoc.data().balance || 0) - amount });
+                        batch.update(borrowerRef, { balance: (borrowerDoc.data().balance || 0) + amount });
+                        
+                        const newLoanRef = doc(collection(db, "loans"));
+                        batch.set(newLoanRef, {
+                            bankId: data.bankId,
+                            borrowerId: data.borrowerId,
+                            borrowerType: borrowerType,
+                            totalAmount: amount,
+                            interestRate: parseFloat(data.interestRate),
+                            totalInstallments: parseInt(data.installments),
+                            currentInstallment: 0,
+                            remainingAmount: amount + (amount * (parseFloat(data.interestRate)/100)),
+                            createdAt: serverTimestamp()
+                        });
+                        await batch.commit();
+                        alert("Empréstimo concedido!");
+                    } break;
+                    case 'process-zero-balances': {
+                        const batch = writeBatch(db);
+                        state.residents.forEach(r => batch.update(doc(db, "residents", r.id), { balance: 0 }));
+                        state.businesses.forEach(b => batch.update(doc(db, "businesses", b.id), { balance: 0 }));
+                        await batch.commit();
+                        alert("Todos os saldos foram zerados.");
+                    } break;
+                    case 'process-reset-central-bank': {
+                        const batch = writeBatch(db);
+                        state.residents.forEach(r => {
+                            const newEmployment = (r.employment || []).map(j => ({ ...j, salary: 0 }));
+                            batch.update(doc(db, "residents", r.id), { balance: 0, employment: newEmployment });
+                        });
+                        state.businesses.forEach(b => batch.update(doc(db, "businesses", b.id), { balance: 0 }));
+                        state.taxes.forEach(t => batch.delete(doc(db, "taxes", t.id)));
+                        state.specialTaxes.forEach(st => batch.delete(doc(db, "specialTaxes", st.id)));
+                        await batch.commit();
+                        alert("Banco Central resetado com sucesso.");
+                    } break;
+                    case 'process-transfer-inheritance': {
+                        const deceasedRef = doc(db, "residents", data.deceasedId);
+                        const heirRef = doc(db, "residents", data.heirId);
+                        const deceasedDoc = await getDoc(deceasedRef);
+                        const heirDoc = await getDoc(heirRef);
+                        const amount = deceasedDoc.data().balance || 0;
+                        const newHeirBalance = (heirDoc.data().balance || 0) + amount;
+                        const batch = writeBatch(db);
+                        batch.update(deceasedRef, { balance: 0 });
+                        batch.update(heirRef, { balance: newHeirBalance });
+                        await batch.commit();
+                        alert("Herança transferida com sucesso.");
+                    } break;
+                    case 'save-global-finance': {
+                        await updateDoc(doc(db, "config", "finance"), {
+                            costOfLiving: parseFloat(data.costOfLiving || 0),
+                            foodTax: parseFloat(data.foodTax || 0)
+                        });
+                    } break;
+                    case 'save-fixed-expenses-list': {
+                        const names = formData.getAll('fixedName');
+                        const values = formData.getAll('fixedValue');
+                        const list = names.map((n, i) => ({ name: n, value: parseFloat(values[i] || 0) }));
+                        await setDoc(doc(db, "config", "fixedExpenses"), { list });
+                    } break;
+                    case 'add-fixed-expense-resident': {
+                        const sim = state.residents.find(r => r.id === data.id);
+                        const selectedIndices = formData.getAll('selectedFixed');
+                        let fixed = sim.fixedExpenses || [];
+                        selectedIndices.forEach(idx => fixed.push(state.fixedExpensesList[idx]));
+                        if (data.customName) fixed.push({ name: data.customName, value: parseFloat(data.customValue || 0) });
+                        await updateDoc(doc(db, "residents", data.id), { fixedExpenses: fixed });
+                    } break;
+                    case 'add-fixed-expense-business': {
+                        const biz = state.businesses.find(b => b.id === data.id);
+                        const selectedIndices = formData.getAll('selectedFixed');
+                        let fixed = biz.fixedExpenses || [];
+                        selectedIndices.forEach(idx => fixed.push(state.fixedExpensesList[idx]));
+                        if (data.customName) fixed.push({ name: data.customName, value: parseFloat(data.customValue || 0) });
+                        await updateDoc(doc(db, "businesses", data.id), { fixedExpenses: fixed });
+                    } break;
+                    case 'process-manual-revenue': {
+                        const biz = state.businesses.find(b => b.id === data.id);
+                        const newBalance = (biz.balance || 0) + parseFloat(data.amount || 0);
+                        await updateDoc(doc(db, "businesses", data.id), { balance: newBalance });
+                    } break;
+                    case 'process-manual-expense-business': {
+                        const biz = state.businesses.find(b => b.id === data.id);
+                        const newBalance = (biz.balance || 0) - parseFloat(data.amount || 0);
+                        await updateDoc(doc(db, "businesses", data.id), { balance: newBalance });
+                    } break;
+                    case 'save-special-tax': {
+                        await addDoc(collection(db, "specialTaxes"), { 
+                            name: data.name, 
+                            rate: parseFloat(data.rate || 0), 
+                            targetIds: formData.getAll('targetIds'), 
+                            createdAt: serverTimestamp() 
+                        });
+                    } break;
+                    case 'process-inject': {
+                        const sim = state.residents.find(r => r.id === data.id);
+                        const newBalance = (sim.balance || 0) + parseFloat(data.amount);
+                        await updateDoc(doc(db, "residents", data.id), { balance: newBalance });
+                    } break;
+                    case 'process-expense': {
+                        const sim = state.residents.find(r => r.id === data.id);
+                        const newBalance = (sim.balance || 0) - parseFloat(data.amount);
+                        await updateDoc(doc(db, "residents", data.id), { balance: newBalance });
+                    } break;
+                    case 'update-job-salary': {
+                        const sim = state.residents.find(r => r.id === data.residentId);
+                        const newEmployment = sim.employment.map(j => {
+                            if (j.businessId === data.businessId) return { ...j, salary: parseFloat(data.salary) };
+                            return j;
+                        });
+                        await updateDoc(doc(db, "residents", data.residentId), { employment: newEmployment });
+                    } break;
+                    case 'add-tax': await addDoc(collection(db, "taxes"), { name: data.name, rate: parseFloat(data.rate), category: data.category, createdAt: serverTimestamp() }); break;
+                    case 'edit-tax': await updateDoc(doc(db, "taxes", id), { name: data.name, rate: parseFloat(data.rate), category: data.category }); break;
                     case 'process-delete-business': await handleBusinessRemoval(data.id, data.reason); break;
                     case 'process-delete-branch': await handleBranchRemoval(data.id, data.reason); break;
                     case 'process-vote': await processVote(data.voterId, data.candidateId); break;
                     case 'start-election': await startElection(data); break;
                     case 'start-second-round': await startSecondRound(formData.getAll('candidateIds')); break;
-                    case 'save-sectors': 
-                        await setDoc(doc(db, "config", "sectors"), { list: Array.from(formData.getAll('sectorName')) }); 
-                        break;
+                    case 'save-sectors': await setDoc(doc(db, "config", "sectors"), { list: Array.from(formData.getAll('sectorName')) }); break;
                     case 'process-removal': await handleProcessRemoval(data.residentId, data.reason); break;
-                    case 'add-resident': await addDoc(collection(db, "residents"), { ...data, regionId, employment: [], education: [], history: [], relationships: [], councilRoles: [], partyId: null, governmentRole: null, isDeceased: false, createdAt: serverTimestamp() }); break;
-                    case 'edit-resident': await updateDoc(doc(db, "residents", id), { ...data, regionId }); break;
+                    case 'add-resident': await addDoc(collection(db, "residents"), { ...data, balance: parseFloat(data.balance || 0), regionId, employment: [], education: [], history: [], relationships: [], councilRoles: [], partyId: null, governmentRole: null, fixedExpenses: [], isDeceased: false, createdAt: serverTimestamp() }); break;
+                    case 'edit-resident': await updateDoc(doc(db, "residents", id), { ...data, balance: parseFloat(data.balance || 0), regionId }); break;
                     case 'delete-resident': await handleDeleteResident(id); if (state.currentPage !== 'settings') state.currentPage = 'dashboard'; break;
                     case 'add-relationship': await handleAddRelationship(id, data.relatedSimId, data.relationshipType); break;
                     case 'add-business': await handleAddBusiness(data); break;
                     case 'edit-business': await handleEditBusiness(id, data); break;
                     case 'add-branch': await addDoc(collection(db, "branches"), { ...data, regionId: data.regionId === 'null' ? null : data.regionId, managerId: data.managerId === 'null' ? null : data.managerId, createdAt: serverTimestamp() }); break;
                     case 'edit-branch': await updateDoc(doc(db, "branches", id), { ...data, regionId: data.regionId === 'null' ? null : data.regionId, managerId: data.managerId === 'null' ? null : data.managerId }); break;
-                    case 'add-job': await handleHire(data.businessId, data.branchId === 'null' ? null : data.branchId, data.residentId, data.position); break;
-                    case 'add-employee': await handleHire(id, null, data.residentId, data.position); break;
+                    case 'add-job': await handleHire(data.businessId, data.branchId === 'null' ? null : data.branchId, data.residentId, data.position, parseFloat(data.salary || 0)); break;
+                    case 'add-employee': await handleHire(id, null, data.residentId, data.position, parseFloat(data.salary || 0)); break;
                     case 'add-employee-branch': {
                         const br = state.branches.find(b => b.id === data.id);
-                        await handleHire(br.parentBusinessId, data.id, data.residentId, data.position);
+                        await handleHire(br.parentBusinessId, data.id, data.residentId, data.position, parseFloat(data.salary || 0));
                     } break;
                     case 'remove-employee-with-reason': await handleRemoveEmployee(data.residentId, data.businessId, data.reason); break;
                     case 'remove-minister-with-reason': await handleRemoveMinister(data.residentId, data.officeId, data.officeName, data.reason); break;
@@ -1179,8 +1845,113 @@
                 closeModal();
             } catch (error) {
                 console.error("Erro no Firebase:", error);
-                alert("Ocorreu um erro ao salvar.");
             }
+        }
+
+        async function processFinanceCycle() {
+            const batch = writeBatch(db);
+            const taxesResident = state.taxes.filter(t => t.category === 'resident');
+            const taxesBusiness = state.taxes.filter(t => t.category === 'business');
+            
+            const costOfLivingRate = (state.financeConfig.costOfLiving || 0) / 100;
+            const foodTaxRate = (state.financeConfig.foodTax || 0) / 100;
+
+            let currentCirculating = 0;
+
+            // 1. Processar Empréstimos (Tomador paga ao Banco)
+            state.loans.forEach(loan => {
+                const borrowerRef = doc(db, loan.borrowerType, loan.borrowerId);
+                const bankRef = doc(db, "businesses", loan.bankId);
+                
+                const installmentAmount = loan.remainingAmount / (loan.totalInstallments - loan.currentInstallment);
+                
+                const borrower = loan.borrowerType === 'residents' 
+                    ? state.residents.find(r => r.id === loan.borrowerId) 
+                    : state.businesses.find(b => b.id === loan.borrowerId);
+                
+                const bank = state.businesses.find(b => b.id === loan.bankId);
+                
+                if (borrower && bank) {
+                    batch.update(borrowerRef, { balance: (borrower.balance || 0) - installmentAmount });
+                    batch.update(bankRef, { balance: (bank.balance || 0) + installmentAmount });
+                    
+                    if (loan.currentInstallment + 1 >= loan.totalInstallments) {
+                        batch.delete(doc(db, "loans", loan.id));
+                    } else {
+                        batch.update(doc(db, "loans", loan.id), {
+                            currentInstallment: loan.currentInstallment + 1,
+                            remainingAmount: loan.remainingAmount - installmentAmount
+                        });
+                    }
+                }
+            });
+
+            // 2. Moradores
+            state.residents.filter(r => !r.isDeceased).forEach(sim => {
+                let currentBalance = sim.balance || 0;
+                let totalSalary = (sim.employment || []).reduce((acc, job) => acc + (job.salary || 0), 0);
+                
+                // Adicionar Salário Público Individual
+                const ministryId = Object.keys(state.government.roles).find(k => state.government.roles[k] === sim.id);
+                if (ministryId) {
+                    const govSal = state.government.salaries?.[ministryId] || 0;
+                    totalSalary += govSal;
+                }
+
+                let totalFixedExp = (sim.fixedExpenses || []).reduce((acc, ex) => acc + (ex.value || 0), 0);
+                
+                currentBalance += totalSalary;
+                currentBalance -= totalFixedExp;
+
+                // Gastos Automáticos (Padrão de Vida)
+                const autoExpenses = currentBalance * (costOfLivingRate + foodTaxRate);
+                currentBalance -= autoExpenses;
+
+                // Impostos Padrão (sobre salário)
+                taxesResident.forEach(tax => {
+                    const deduction = totalSalary * (tax.rate / 100);
+                    currentBalance -= deduction;
+                });
+
+                // Impostos Especiais (sobre saldo acumulado)
+                state.specialTaxes.forEach(st => {
+                    if (st.targetIds?.includes(sim.id)) {
+                        const deduction = currentBalance * (st.rate / 100);
+                        currentBalance -= deduction;
+                    }
+                });
+
+                currentCirculating += currentBalance;
+                batch.update(doc(db, "residents", sim.id), { balance: currentBalance });
+            });
+
+            // 3. Empresas
+            state.businesses.forEach(biz => {
+                let currentBalance = biz.balance || 0;
+                let totalFixedExp = (biz.fixedExpenses || []).reduce((acc, ex) => acc + (ex.value || 0), 0);
+
+                const employees = state.residents.filter(r => !r.isDeceased && r.employment?.some(j => j.businessId === biz.id));
+                const totalPayroll = employees.reduce((acc, emp) => {
+                    const myJobs = emp.employment.filter(j => j.businessId === biz.id);
+                    return acc + myJobs.reduce((innerAcc, job) => innerAcc + (job.salary || 0), 0);
+                }, 0);
+
+                currentBalance -= totalPayroll;
+                currentBalance -= totalFixedExp;
+
+                taxesBusiness.forEach(tax => {
+                    const deduction = currentBalance * (tax.rate / 100);
+                    currentBalance -= deduction;
+                });
+
+                currentCirculating += currentBalance;
+                batch.update(doc(db, "businesses", biz.id), { balance: currentBalance });
+            });
+
+            batch.update(doc(db, "config", "finance"), { lastCycle: serverTimestamp(), totalCirculating: currentCirculating });
+            
+            await batch.commit();
+            alert("Ciclo Financeiro concluído! Processado: Salários Públicos, Empréstimos Bancários, Gastos Fixos e Impostos.");
         }
 
         async function handleBusinessRemoval(bizId, reason) {
@@ -1231,11 +2002,10 @@
         }
 
         async function startSecondRound(candidateIds) {
-            // Filter candidates
             const selectedCandidates = (state.election.candidates || []).filter(c => candidateIds.includes(c.id));
             await updateDoc(doc(db, "election", "current"), {
                 round: 2,
-                votes: [], // Reset votes for 2nd round
+                votes: [],
                 candidates: selectedCandidates
             });
         }
@@ -1256,10 +2026,7 @@
                 }, {});
 
                 await addDoc(collection(db, "electionHistory"), {
-                    type,
-                    ministryId,
-                    ministryName,
-                    winnerId,
+                    type, ministryId, ministryName, winnerId,
                     winnerVotes: voteCount[winnerId] || 0,
                     totalVotes: (votes || []).length,
                     votes: (votes || []),
@@ -1268,11 +2035,8 @@
                     round: round || 1
                 });
 
-                if (type === 'prefeito') {
-                    await handleAppointMinister('prefeito', 'Prefeito(a)', winnerId);
-                } else {
-                    await handleAppointMinister(ministryId, ministryName, winnerId);
-                }
+                if (type === 'prefeito') await handleAppointMinister('prefeito', 'Prefeito(a)', winnerId);
+                else await handleAppointMinister(ministryId, ministryName, winnerId);
             }
             await setDoc(doc(db, "election", "current"), { isActive: false });
         }
@@ -1282,9 +2046,7 @@
             const typeLabel = type === 'prefeito' ? 'Prefeito(a)' : `Ministro(a) (${ministryName})`;
             const roundLabel = round === 2 ? '2º Turno' : '1º Turno';
             const curVotes = votes || [];
-            
             let out = `### RELATÓRIO PARCIAL DE ELEIÇÃO: ${typeLabel} - ${roundLabel}\n\n`;
-            
             const results = (candidates || []).map(c => {
                 const sim = state.residents.find(x => x.id === c.id);
                 const party = state.parties.find(p => p.id === sim?.partyId);
@@ -1293,37 +2055,20 @@
                     const vs = state.residents.find(x => x.id === v.voterId);
                     return vs ? `${vs.firstName} ${vs.lastName}` : 'Anônimo';
                 });
-
-                return {
-                    name: sim ? `${sim.firstName} ${sim.lastName}` : 'Desconhecido',
-                    party: party ? party.name : 'Sem Partido',
-                    count: myVotes.length,
-                    voters: votersNames
-                };
+                return { name: sim ? `${sim.firstName} ${sim.lastName}` : 'Desconhecido', party: party ? party.name : 'Sem Partido', count: myVotes.length, voters: votersNames };
             }).sort((a,b) => b.count - a.count);
-
-            results.forEach(res => {
-                out += `CANDIDATO: ${res.name} (${res.party})\nVOTOS: ${res.count}\nVOTANTES: ${res.voters.join(", ") || 'Nenhum'}\n\n`;
-            });
-
+            results.forEach(res => { out += `CANDIDATO: ${res.name} (${res.party})\nVOTOS: ${res.count}\nVOTANTES: ${res.voters.join(", ") || 'Nenhum'}\n\n`; });
             if (results.length > 0) out += `VENCEDOR ATUAL: ${results[0].name}\n`;
             else out += `NENHUM CANDIDATO REGISTRADO.\n`;
-
-            state.currentPage = 'register';
-            render();
-            
+            state.currentPage = 'register'; render();
             const textarea = document.getElementById('report-textarea');
             const output = document.getElementById('report-output');
-            if (textarea && output) {
-                textarea.value = out;
-                output.classList.remove('hidden');
-            }
+            if (textarea && output) { textarea.value = out; output.classList.remove('hidden'); }
         }
 
         async function handleProcessRemoval(resId, reason) {
-            if (reason === 'Morreu') {
-                await updateDoc(doc(db, "residents", resId), { isDeceased: true, deathDate: new Date(), employment: [] });
-            } else {
+            if (reason === 'Morreu') await updateDoc(doc(db, "residents", resId), { isDeceased: true, deathDate: new Date(), employment: [] });
+            else {
                 await deleteDoc(doc(db, "residents", resId));
                 state.residents.forEach(async r => {
                     if (r.relationships?.some(rel => rel.residentId === resId)) {
@@ -1332,15 +2077,14 @@
                     }
                 });
             }
-            state.currentPage = 'dashboard';
-            render();
+            state.currentPage = 'dashboard'; render();
         }
 
-        async function handleHire(bizId, brId, resId, pos) {
+        async function handleHire(bizId, brId, resId, pos, sal) {
             const resRef = doc(db, "residents", resId);
             const resDoc = await getDoc(resRef);
             const currentJobs = normalizeEmployment(resDoc.data()?.employment);
-            currentJobs.push({ businessId: bizId, branchId: brId, position: pos });
+            currentJobs.push({ businessId: bizId, branchId: brId, position: pos, salary: sal });
             await updateDoc(resRef, { employment: currentJobs });
         }
 
@@ -1484,16 +2228,10 @@
             const councilRef = doc(db, "councils", councilId);
             const council = state.councils.find(c => c.id === councilId);
             if (!council) return;
-            
-            // Remove from council list
             const newCouncilorIds = (council.councilorIds || []).filter(id => id !== residentId);
             batch.update(councilRef, { councilorIds: newCouncilorIds });
-            
-            // Remove role from resident
             await updateResidentCouncilRoles(batch, residentId, councilId, council.name, null);
-            
-            // Log history if needed
-             if (reason !== 'Apenas remoção') {
+            if (reason !== 'Apenas remoção') {
                 const residentRef = doc(db, "residents", residentId);
                 const resDoc = await getDoc(residentRef);
                 const resident = resDoc.data();
@@ -1502,7 +2240,6 @@
                      batch.update(residentRef, { history: [...(resident.history || []), historyEntry] });
                 }
             }
-            
             await batch.commit();
         }
 
@@ -1517,9 +2254,7 @@
 
         async function handleAddRelationship(simAId, simBId, type) {
             const resA = state.residents.find(s => s.id === simAId);
-            await updateDoc(doc(db, "residents", simAId), { 
-                relationships: [...(resA.relationships || []), { residentId: simBId, type: type }] 
-            });
+            await updateDoc(doc(db, "residents", simAId), { relationships: [...(resA.relationships || []), { residentId: simBId, type: type }] });
         }
 
         async function handleDeleteRelationship(residentId, index) {
@@ -1533,9 +2268,15 @@
         async function handleAddBusiness(data) {
             const ownerId = data.ownerId === 'null' ? null : data.ownerId;
             const regionId = data.regionId === 'null' ? null : data.regionId;
-            const bizData = { name: data.name, sector: data.sector, ownerId, regionId, createdAt: serverTimestamp(), ...(data.sector === 'Educação' && { institutionType: data.institutionType, courses: [] }) };
+            const bizData = { 
+                name: data.name, sector: data.sector, ownerId, regionId, 
+                balance: parseFloat(data.balance || 0), 
+                fixedExpenses: [],
+                createdAt: serverTimestamp(), 
+                ...(data.sector === 'Educação' && { institutionType: data.institutionType, courses: [] }) 
+            };
             const newBizRef = await addDoc(collection(db, "businesses"), bizData);
-            if (ownerId) await handleHire(newBizRef.id, null, ownerId, 'Proprietário(a)');
+            if (ownerId) await handleHire(newBizRef.id, null, ownerId, 'Proprietário(a)', 0);
         }
 
         async function handleEditBusiness(id, data) {
@@ -1543,7 +2284,11 @@
             const newOwnerId = data.ownerId === 'null' ? null : data.ownerId;
             const newRegionId = data.regionId === 'null' ? null : data.regionId;
             const batch = writeBatch(db);
-            batch.update(doc(db, "businesses", id), { name: data.name, sector: data.sector, ownerId: newOwnerId, regionId: newRegionId, ...(data.sector === 'Educação' && { institutionType: data.institutionType }) });
+            batch.update(doc(db, "businesses", id), { 
+                name: data.name, sector: data.sector, ownerId: newOwnerId, regionId: newRegionId,
+                balance: parseFloat(data.balance || 0),
+                ...(data.sector === 'Educação' && { institutionType: data.institutionType }) 
+            });
             if (oldBiz.ownerId !== newOwnerId) {
                 if (oldBiz.ownerId) {
                     const oldOwner = state.residents.find(r => r.id === oldBiz.ownerId);
@@ -1555,7 +2300,7 @@
                 if (newOwnerId) {
                     const newOwner = state.residents.find(r => r.id === newOwnerId);
                     if (newOwner) {
-                        const newEmp = [...normalizeEmployment(newOwner.employment), { businessId: id, position: 'Proprietário(a)' }];
+                        const newEmp = [...normalizeEmployment(newOwner.employment), { businessId: id, position: 'Proprietário(a)', salary: 0 }];
                         batch.update(doc(db, "residents", newOwnerId), { employment: newEmp });
                     }
                 }
@@ -1577,72 +2322,50 @@
             let out = `### REGISTRO DETALHADO SIM - ${new Date().toLocaleString('pt-BR')}\n==========================\n\n`;
             if (type === 'residents') {
                 state.residents.filter(r => !r.isDeceased).forEach(r => {
-                    out += `NOME: ${r.firstName} ${r.lastName}\nFASE: ${r.lifeStage} | GÊNERO: ${r.gender}\n`;
+                    const hasWallet = !['Bebê', 'Criança', 'Pré-adolescente'].includes(r.lifeStage);
+                    const sc = getSocialClass(r.balance || 0);
+                    out += `NOME: ${r.firstName} ${r.lastName}\nFASE: ${r.lifeStage}\n`;
+                    if (hasWallet) out += `SALDO: 🪙 ${r.balance?.toLocaleString() || 0} [${sc.label}]\n`;
                     out += `REGIÃO: ${state.regions.find(reg => reg.id === r.regionId)?.name || 'S/R'}\nOCUPAÇÕES:\n`;
                     if (r.employment?.length) {
                         r.employment.forEach(j => {
                             const b = state.businesses.find(x => x.id === j.businessId);
-                            const br = state.branches.find(x => x.id === j.branchId);
-                            out += `- ${j.position} em ${b?.name || '?'}${br ? ` (Unidade ${br.name})` : ' (Sede)'}\n`;
+                            out += `- ${j.position} em ${b?.name || '?'} (Salário Ciclo: ${j.salary || 0})\n`;
                         });
                     } else out += ` - Desempregado(a)\n`;
-                    out += `RELAÇÕES:\n`;
-                    r.relationships?.forEach(rel => {
-                        const p = state.residents.find(x => x.id === rel.residentId);
-                        out += `- ${rel.type}: ${p ? p.firstName + ' ' + p.lastName : '?'}${p?.isDeceased ? ' [+ FALECIDO]' : ''}\n`;
-                    });
                     out += `--------------------------\n\n`;
                 });
             } else if (type === 'businesses') {
                 state.businesses.forEach(b => {
-                    const owner = state.residents.find(r => r.id === b.ownerId);
-                    out += `EMPRESA: ${b.name}\nSETOR: ${b.sector}\nDONO (A): ${owner ? owner.firstName + ' ' + owner.lastName : 'PÚBLICA'}\nUNIDADES:\n`;
-                    const brs = state.branches.filter(br => br.parentBusinessId === b.id);
-                    if (brs.length) brs.forEach(br => out += ` - ${br.name}\n`);
-                    else out += ` - Sede Única\n`;
-                    out += `FUNCIONÁRIOS:\n`;
-                    const emps = state.residents.filter(r => !r.isDeceased && r.employment?.some(j => j.businessId === b.id));
-                    emps.forEach(e => out += `- ${e.firstName} ${e.lastName} (${e.employment.find(j => j.businessId === b.id).position})\n`);
-                    out += `--------------------------\n\n`;
+                    out += `EMPRESA: ${b.name}\nSALDO: 🪙 ${b.balance?.toLocaleString() || 0}\nSETOR: ${b.sector}\n--------------------------\n\n`;
                 });
-
-                if (state.closedRecords.length > 0) {
-                    out += `\n\nHISTÓRICO DE EMPRESAS/LEIS EXTINTAS (FALÊNCIA / ENCERRAMENTO)\n==========================\n`;
-                    state.closedRecords.sort((a,b) => (b.date?.seconds || 0) - (a.date?.seconds || 0)).forEach(rec => {
-                        out += `NOME: ${rec.name}\nSETOR: ${rec.sector}\nTIPO: ${rec.type}\nMOTIVO: ${rec.reason}\nDESCRIÇÃO: ${rec.description || 'N/A'}\nDATA: ${new Date(rec.date?.seconds * 1000).toLocaleString('pt-BR')}\n--------------------------\n`;
-                    });
-                }
             } else if (type === 'politics') {
                 out += `CENÁRIO POLÍTICO COMPLETO\n\n--- PODER EXECUTIVO ---\n`;
                 const ministries = [...defaultMinistries, ...(state.government.ministries || [])];
                 ministries.forEach(m => {
                     const holderId = state.government.roles?.[m.id];
                     const holder = state.residents.find(r => r.id === holderId);
-                    out += `${m.name}: ${holder ? `${holder.firstName} ${holder.lastName}` : 'CARGO VAGO'}\n`;
-                });
-
-                out += `\n--- PARTIDOS POLÍTICOS ---\n`;
-                state.parties.forEach(p => {
-                    const president = state.residents.find(r => r.id === p.presidentId);
-                    const members = state.residents.filter(r => r.partyId === p.id);
-                    out += `PARTIDO: ${p.name} (${p.spectrum})\nPRESIDENTE: ${president ? `${president.firstName} ${president.lastName}` : 'N/A'}\nMEMBROS (${members.length}): ${members.map(m => `${m.firstName} ${m.lastName}`).join(", ") || 'Nenhum'}\n\n`;
-                });
-
-                out += `\n--- CONSELHOS ---\n`;
-                state.councils.forEach(c => {
-                    const president = state.residents.find(r => r.id === c.presidentId);
-                    const members = (c.councilorIds || []).map(id => state.residents.find(r => r.id === id)).filter(Boolean);
-                    out += `CONSELHO: ${c.name}\nPRESIDENTE: ${president ? `${president.firstName} ${president.lastName}` : 'N/A'}\nMEMBROS: ${members.map(m => `${m.firstName} ${m.lastName}`).join(", ") || 'Nenhum'}\n\n`;
-                });
-
-                out += `\n--- LEIS MUNICIPAIS ---\n`;
-                state.laws.forEach(l => {
-                    const dec = state.residents.find(r => r.id === l.proclaimedById);
-                    out += `LEI: ${l.title}\nDESCRIÇÃO: ${l.description}\nDECRETADO POR: ${dec ? `${dec.firstName} ${dec.lastName}` : 'N/A'}\n\n`;
+                    const sal = state.government.salaries?.[m.id] || 0;
+                    out += `${m.name}: ${holder ? `${holder.firstName} ${holder.lastName}` : 'CARGO VAGO'} (Salário: 🪙 ${sal.toLocaleString()})\n`;
                 });
             } else if (type === 'obituary') {
                 const dead = state.residents.filter(r => r.isDeceased);
-                dead.forEach(r => out += `+ ${r.firstName} ${r.lastName}\nFaleceu em: ${new Date(r.deathDate?.seconds * 1000).toLocaleDateString('pt-BR')}\nFase em vida: ${r.lifeStage}\n--------------------------\n\n`);
+                dead.forEach(r => out += `+ ${r.firstName} ${r.lastName} [† ${new Date(r.deathDate?.seconds * 1000).toLocaleDateString('pt-BR')}]\n`);
+            } else if (type === 'finance-transparency') {
+                out += `TRANSPARÊNCIA FINANCEIRA\n\n--- RANKING DE RIQUEZA (MORADORES) ---\n`;
+                const topResidents = [...state.residents].filter(r => !r.isDeceased).sort((a,b) => (b.balance || 0) - (a.balance || 0)).slice(0, 10);
+                topResidents.forEach((r, i) => out += `${i+1}. ${r.firstName} ${r.lastName}: 🪙 ${r.balance?.toLocaleString()}\n`);
+                
+                out += `\n--- RANKING DE RIQUEZA (EMPRESAS) ---\n`;
+                const topBiz = [...state.businesses].sort((a,b) => (b.balance || 0) - (a.balance || 0)).slice(0, 10);
+                topBiz.forEach((b, i) => out += `${i+1}. ${b.name}: 🪙 ${b.balance?.toLocaleString()}\n`);
+
+                out += `\n--- INADIMPLENTES (SALDO NEGATIVO) ---\n`;
+                const negatives = state.residents.filter(r => !r.isDeceased && (r.balance || 0) < 0);
+                if (negatives.length === 0) out += "Nenhum cidadão com saldo negativo.\n";
+                else negatives.forEach(r => out += `- ${r.firstName} ${r.lastName}: 🪙 ${r.balance.toLocaleString()}\n`);
+                
+                out += `\nESTATÍSTICAS GERAIS:\nTotal em Circulação: 🪙 ${state.financeConfig.totalCirculating.toLocaleString()}\n`;
             }
             document.getElementById('report-textarea').value = out;
             document.getElementById('report-output').classList.remove('hidden');
@@ -1714,9 +2437,13 @@
 
         document.addEventListener('click', (e) => {
             const target = e.target.closest('[data-action]'); if (!target) return;
-            const { action, page, id, modalType, type, tab, relIndex } = target.dataset;
+            const { action, page, id, modalType, type, tab, relIndex, index } = target.dataset;
 
             switch (action) {
+                case 'extinguish-balance': {
+                    updateDoc(doc(db, "residents", id), { balance: 0 });
+                    alert("Saldo extinto com sucesso.");
+                } break;
                 case 'navigate': state.currentPage = page; state.searchQuery = ""; render(); break;
                 case 'view-profile':
                     state.currentPage = `${type}-profile`;
@@ -1735,6 +2462,9 @@
                     localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light'); render(); break;
                 case 'delete-relationship': handleDeleteRelationship(target.dataset.simAId, parseInt(relIndex)); break;
                 case 'delete-election-history': deleteDoc(doc(db, "electionHistory", id)); break;
+                case 'delete-tax': deleteDoc(doc(db, "taxes", id)); break;
+                case 'delete-special-tax': deleteDoc(doc(db, "specialTaxes", id)); break;
+                case 'process-finance-cycle': processFinanceCycle(); break;
                 case 'generate-election-report': generateElectionReport(); break;
                 case 'add-sector-field': {
                     const div = document.createElement('div');
@@ -1744,6 +2474,26 @@
                     lucide.createIcons();
                 } break;
                 case 'remove-sector-field': target.closest('.flex').remove(); break;
+                case 'add-fixed-row': {
+                    const div = document.createElement('div');
+                    div.className = 'flex gap-2 items-center bg-[--bg-color] p-2 rounded';
+                    div.innerHTML = '<input type="text" name="fixedName" class="w-1/2 p-2 text-sm border rounded" placeholder="Nome" required><input type="number" name="fixedValue" class="w-1/3 p-2 text-sm border rounded" placeholder="Valor" required><button type="button" data-action="remove-fixed-row" class="text-red-500"><i data-lucide="trash-2" class="h-4 w-4"></i></button>';
+                    document.getElementById('fixed-list-container').appendChild(div);
+                    lucide.createIcons();
+                } break;
+                case 'remove-fixed-row': target.closest('.bg-[--bg-color]').remove(); break;
+                case 'delete-fixed-expense-resident': {
+                    const sim = state.residents.find(r => r.id === id);
+                    let fixed = [...sim.fixedExpenses];
+                    fixed.splice(parseInt(index), 1);
+                    updateDoc(doc(db, "residents", id), { fixedExpenses: fixed });
+                } break;
+                case 'delete-fixed-expense-business': {
+                    const biz = state.businesses.find(b => b.id === id);
+                    let fixed = [...biz.fixedExpenses];
+                    fixed.splice(parseInt(index), 1);
+                    updateDoc(doc(db, "businesses", id), { fixedExpenses: fixed });
+                } break;
                 case 'remove-student': (async () => {
                     const residentRef = doc(db, "residents", target.dataset.residentId);
                     const resDoc = await getDoc(residentRef);
@@ -1771,7 +2521,12 @@
             }
         });
 
-        document.addEventListener('submit', (e) => { e.preventDefault(); const form = e.target.closest('form'); if (form) handleFormSubmit(form); });
+        document.addEventListener('submit', (e) => { 
+            e.preventDefault(); 
+            const form = e.target.closest('form'); 
+            if (form) handleFormSubmit(form); 
+        });
+
         document.addEventListener('input', (e) => { if (e.target.id === 'search-input') { state.searchQuery = e.target.value; updateListPage(); } });
 
         function checkAllDataLoaded() {
@@ -1787,7 +2542,7 @@
             const page = state.currentPage;
             const isDashboard = page === 'dashboard' || page === 'resident-profile';
             const isBusinesses = page === 'businesses' || page === 'business-profile' || page === 'branch-profile';
-            const isMore = ['more', 'politics', 'party-profile', 'council-profile', 'register', 'settings', 'regions', 'region-profile', 'census-data'].includes(page);
+            const isMore = ['more', 'politics', 'party-profile', 'council-profile', 'register', 'settings', 'regions', 'region-profile', 'census-data', 'finance'].includes(page);
 
             document.querySelectorAll('.nav-button').forEach(btn => {
                 const pageName = btn.dataset.page;
@@ -1820,6 +2575,30 @@
             if (state.initialRenderDone) render();
         });
 
+        onSnapshot(collection(db, "taxes"), (snapshot) => {
+            state.taxes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort(sortByCreated);
+            state.dataLoaded.taxes = true; checkAllDataLoaded();
+            if (state.initialRenderDone) render();
+        });
+
+        onSnapshot(collection(db, "specialTaxes"), (snapshot) => {
+            state.specialTaxes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort(sortByCreated);
+            state.dataLoaded.specialTaxes = true; checkAllDataLoaded();
+            if (state.initialRenderDone) render();
+        });
+
+        onSnapshot(doc(db, "config", "fixedExpenses"), (doc) => {
+            state.fixedExpensesList = doc.data()?.list || [];
+            state.dataLoaded.fixedExpensesList = true; checkAllDataLoaded();
+            if (state.initialRenderDone) render();
+        });
+
+        onSnapshot(doc(db, "config", "finance"), (doc) => {
+            state.financeConfig = doc.data() || { lastCycle: null, totalCirculating: 0, costOfLiving: 0, foodTax: 0 };
+            state.dataLoaded.financeConfig = true; checkAllDataLoaded();
+            if (state.initialRenderDone) render();
+        });
+
         onSnapshot(collection(db, "closedRecords"), (snapshot) => {
             state.closedRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             state.dataLoaded.closedRecords = true; checkAllDataLoaded();
@@ -1838,7 +2617,6 @@
             if (state.initialRenderDone) render();
         });
 
-        // New Snapshot for Laws
         onSnapshot(collection(db, "laws"), (snapshot) => {
             state.laws = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort(sortByCreated);
             state.dataLoaded.laws = true; checkAllDataLoaded();
@@ -1875,9 +2653,21 @@
             if (state.initialRenderDone) render();
         });
 
+        onSnapshot(doc(db, "government", "salaries"), (doc) => {
+            state.government.salaries = doc.data() || {};
+            state.dataLoaded.governmentSalaries = true; checkAllDataLoaded();
+            if (state.initialRenderDone) render();
+        });
+
         onSnapshot(doc(db, "election", "current"), (doc) => {
             state.election = doc.data() || { isActive: false };
             state.dataLoaded.election = true; checkAllDataLoaded();
+            if (state.initialRenderDone) render();
+        });
+
+        onSnapshot(collection(db, "loans"), (snapshot) => {
+            state.loans = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            state.dataLoaded.loans = true; checkAllDataLoaded();
             if (state.initialRenderDone) render();
         });
 
@@ -1887,5 +2677,4 @@
     </script>
 </body>
 </html>
-
 
