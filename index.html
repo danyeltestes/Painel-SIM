@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel SIM SIM.23.09#3.1</title>
+    <title>Painel SIM SIM.23.09#4.1</title>
     <!-- TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts: Inter -->
@@ -222,6 +222,7 @@
             government: { roles: {}, ministries: [], salaries: {} },
             election: { isActive: false, candidates: [], votes: [], type: 'prefeito', ministryId: null, isTestMode: false, round: 1 },
             currentResidentId: null,
+            residentProfileTab: 'overview',
             currentBusinessId: null,
             currentPartyId: null,
             currentCouncilId: null,
@@ -278,7 +279,7 @@
             activeStudentTab: 'ativos'
         };
 
-        const currentVersion = 'SIM.23.09#3.1';
+        const currentVersion = 'SIM.23.09#4.1';
         const lifeStages = ['Bebê', 'Criança', 'Pré-adolescente', 'Adolescente', 'Adulto', 'Idoso'];
         const genders = ['Homem', 'Mulher', 'Homem Trans', 'Mulher Trans', 'Não-Binário'];
         const ethnicities = ['Asiático(a)', 'Branco(a)', 'Pardo(a)', 'Negro(a)'];
@@ -894,6 +895,30 @@
         function simBudgetAvailable(b) {
             return simMoney(Number(b?.allocated||0)-Number(b?.executed||0));
         }
+        function simHasFixedExpense(entity, expense) {
+            if (!expense) return false;
+            return (entity?.fixedExpenses || []).some(x => String(x.name||'').trim() === String(expense.name||'').trim() && String(x.type||'') === String(expense.type||'') && Number(x.value||0) === Number(expense.value||0));
+        }
+
+        function simInstitutionGrantProjection(treasury, allocated, executed, amount, useBudget=true) {
+            const t=simMoney(treasury), a=simMoney(allocated), e=simMoney(executed), v=simMoney(amount);
+            if(!simValidMoney(v)||v<=0) return {ok:false,reason:'Valor inválido'};
+            if(v>t) return {ok:false,reason:'Tesouro insuficiente'};
+            if(useBudget && v>simMoney(a-e)) return {ok:false,reason:'Orçamento insuficiente'};
+            return {ok:true,treasuryAfter:simMoney(t-v),executedAfter:useBudget?simMoney(e+v):e,institutionIncrease:v};
+        }
+
+        function simMassAssignTargetsHTML(expenseIndex) {
+            const expense=state.fixedExpensesList[Number(expenseIndex)];
+            if(!expense) return '<p class="text-sm text-[--text-secondary]">Cadastre um gasto fixo padrão primeiro.</p>';
+            const residents=state.residents.filter(r=>!r.isDeceased), businesses=state.businesses;
+            const available=[...residents.map(r=>({type:'resident',id:r.id,name:`${r.firstName} ${r.lastName}`,entity:r})),...businesses.map(b=>({type:'business',id:b.id,name:b.name,entity:b}))].filter(x=>!simHasFixedExpense(x.entity,expense));
+            const assigned=[...residents.map(r=>({name:`${r.firstName} ${r.lastName}`,entity:r})),...businesses.map(b=>({name:b.name,entity:b}))].filter(x=>simHasFixedExpense(x.entity,expense));
+            const rows=available.map(x=>`<label data-mass-target-name="${simEsc(x.name.toLowerCase())}" class="mass-target-row flex items-center gap-2 p-2 rounded hover:bg-[--border-color]"><input type="checkbox" name="targetIds" value="${x.type}|${x.id}" class="mass-target-checkbox w-4 h-4"><span class="text-xs font-medium">${simEsc(x.name)}</span></label>`).join('');
+            const existing=assigned.map(x=>`<div data-mass-target-name="${simEsc(x.name.toLowerCase())}" class="mass-target-row flex items-center justify-between gap-2 p-2 rounded opacity-60"><span class="text-xs">${simEsc(x.name)}</span><span class="text-[10px] font-bold uppercase text-[--text-secondary]">Já possui</span></div>`).join('');
+            return `<div class="flex justify-between items-center mb-2"><h4 class="font-bold text-sm">Disponíveis para receber</h4><span class="text-xs text-[--text-secondary]">${available.length}</span></div><button type="button" data-action="mass-select-all" class="text-xs font-bold text-[--sims-green-dark] mb-2">Selecionar todos os disponíveis</button><div class="max-h-48 overflow-y-auto border rounded bg-[--bg-color] mb-4">${rows||'<p class="text-xs text-[--text-secondary] p-3">Todos já possuem este gasto.</p>'}</div><details class="border rounded p-2"><summary class="text-xs font-bold cursor-pointer">Já possuem (${assigned.length})</summary><div class="max-h-36 overflow-y-auto mt-2">${existing||'<p class="text-xs text-[--text-secondary]">Ninguém ainda.</p>'}</div></details>`;
+        }
+
         function PublicBudgetSection() {
             if(!state.financeConfig.financialEra) return `<section class="bg-[--card-bg] p-5 rounded-xl border border-[--border-color]"><h2 class="font-bold text-xl mb-2">Orçamento Público</h2><p class="text-sm text-[--text-secondary]">Inaugure uma Era Financeira para utilizar o orçamento municipal.</p></section>`;
             const cycle=simBudgetCycle(), era=state.financeConfig.financialEra, ministries=simAllMinistries();
@@ -915,6 +940,7 @@
                         <button data-action="open-modal" data-modal-type="public-expense" class="px-3 py-2 rounded bg-red-700 text-white text-sm font-bold">Registrar gasto</button>
                         <button data-action="open-modal" data-modal-type="budget-transfer" class="px-3 py-2 rounded bg-blue-700 text-white text-sm font-bold">Transferir orçamento</button>
                         <button data-action="open-modal" data-modal-type="joint-public-project" class="px-3 py-2 rounded bg-purple-700 text-white text-sm font-bold">Projeto conjunto</button>
+                        <button data-action="open-modal" data-modal-type="public-institution-grant" class="px-3 py-2 rounded bg-blue-600 text-white text-sm font-bold">Repasse a instituição</button>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">${cards||'<p>Nenhum ministério cadastrado.</p>'}</div>
@@ -1335,6 +1361,12 @@
                     <button data-action="open-modal" data-modal-type="mass-assign-expense" class="w-full bg-[--sims-green-dark] text-white font-black py-4 rounded-lg shadow hover:opacity-90 transition uppercase tracking-widest flex items-center justify-center gap-2"><i data-lucide="layers"></i> Atribuição de Gasto em Massa</button>
                 </section>
 
+                <section class="bg-[--card-bg] p-4 rounded-xl border border-[--border-color]">
+                    <div class="flex items-center gap-2 mb-2"><i data-lucide="sparkles" class="h-5 w-5 text-[--sims-green-vibrant]"></i><h3 class="font-bold text-lg">Novidades da SIM.23.09#4.1</h3></div>
+                    <p class="text-xs text-[--text-secondary] mb-3">Resumo da atualização instalada atualmente.</p>
+                    <ul class="text-sm space-y-1 list-disc pl-5"><li>Abas do perfil corrigidas e agora clicáveis.</li><li>Navegação do perfil ganhou ícones e destaque visual mais claro.</li><li>Botão “Selecionar todos os disponíveis” da atribuição em massa corrigido.</li><li>Revisão dos controles adicionados na versão 4.</li></ul>
+                </section>
+
                 <section class="border-2 border-red-500/50 rounded-lg p-4"><h3 class="font-bold text-lg text-red-500 mb-2">Zona de Perigo</h3><div class="h-64 overflow-y-auto p-2 bg-[--bg-color] rounded-md border border-[--border-color] no-scrollbar">${residentListHTML || '<p class="text-center text-sm italic py-4">Sem registros.</p>'}</div></section>
             </div>`;
         }
@@ -1498,34 +1530,30 @@
                 <div class="space-y-2">${ownedAssets.map(a=>`<button data-action="view-asset" data-id="${a.id}" class="w-full text-left p-2 border border-[--border-color] rounded"><strong>${assetTypeLabel(a.assetType)} · ${simEsc(a.name)}</strong><span class="float-right">🪙 ${Number(a.value||0).toLocaleString('pt-BR')}</span></button>`).join('')||'<p class="text-xs text-[--text-secondary]">Nenhum bem registrado.</p>'}</div>
             </section>`;
 
-            return `<div class="page-content p-4 md:p-6 space-y-6">
-                <div><button data-action="navigate" data-page="dashboard" class="flex items-center text-sm text-[--sims-green-dark] font-semibold mb-4 hover:underline"><i data-lucide="arrow-left" class="h-4 w-4 mr-2"></i> Voltar para a lista</button>
-                ${deceasedHeader}
-                <div class="flex justify-between items-start">
-                    <div><h1 class="text-3xl font-bold text-[--sims-green-dark]">${sim.firstName} ${sim.lastName}</h1><p class="text-[--text-secondary]">${sim.lifeStage}</p></div>
-                    <div class="flex items-center gap-2">
-                        <button data-action="open-modal" data-modal-type="edit-resident" data-id="${sim.id}" class="bg-[--border-color] text-[--text-primary] px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition">Editar</button>
-                        <button data-action="open-modal" data-modal-type="confirm-removal" data-id="${sim.id}" class="bg-[--danger-bg] text-[--danger-text] p-2 rounded-lg text-sm font-semibold hover:bg-red-200 dark:hover:bg-red-800/50 transition"><i data-lucide="trash-2" class="h-5 w-5"></i></button>
-                    </div>
-                </div></div>
-                
-                <section class="bg-[--card-bg] p-3 rounded-lg border border-[--border-color]"><button data-action="open-entity-history" data-type="resident" data-id="${sim.id}" class="w-full text-left font-bold flex items-center justify-between"><span>📖 História pessoal</span><span class="text-xs text-[--text-secondary]">Abrir histórico completo →</span></button></section>
-                ${financeSectionHTML}
-                ${assetSummaryHTML}
-                ${hasWallet ? (()=>{const mySales=state.sales.filter(v=>v.buyerType==='resident'&&v.buyerId===sim.id),cycle=Number(state.financeConfig.cycleNumber||0),currentSales=mySales.filter(v=>Number(v.cycle||0)===cycle&&v.era===state.financeConfig.financialEra),recurring=(state.financialCycles||[]).filter(c=>c.era===state.financeConfig.financialEra&&c.cycle===cycle).flatMap(c=>c.entries||[]).filter(e=>e.from===simFinAccount('residents',sim.id)&&['subscription','package'].includes(e.kind)),total=currentSales.reduce((a,v)=>a+Number(v.grossRevenue||0),0)+recurring.reduce((a,e)=>a+Number(e.amount||0),0);return `<section class="bg-[--card-bg] p-4 rounded-lg border border-[--border-color]"><h3 class="font-bold text-lg mb-3">Consumo e Serviços</h3><p class="text-sm mb-3"><strong>Total gasto no ciclo ${cycle}:</strong> 🪙 ${total.toLocaleString('pt-BR')}</p><p class="text-xs font-bold uppercase text-[--text-secondary] mb-1">Assinaturas ativas</p>${state.subscriptions.filter(x=>x.subscriberType==='resident'&&x.subscriberId===sim.id&&x.active!==false).map(x=>`<p class="text-xs py-1">${simEsc(x.planName)} · 🪙 ${Number(x.planValue||x.price||0).toLocaleString('pt-BR')}/ciclo</p>`).join('')||'<p class="text-xs text-[--text-secondary]">Nenhuma.</p>'}<p class="text-xs font-bold uppercase text-[--text-secondary] mt-3 mb-1">Pacotes recorrentes</p>${state.consumptionPackages.filter(p=>isPackageEligibleForResident(p,sim,cycle+1,state)).map(p=>`<p class="text-xs py-1">${simEsc(p.name)} · 🪙 ${Number(p.price||0).toLocaleString('pt-BR')}/ciclo</p>`).join('')||'<p class="text-xs text-[--text-secondary]">Nenhum.</p>'}<p class="text-xs font-bold uppercase text-[--text-secondary] mt-3 mb-1">Compras avulsas</p>${mySales.slice(0,20).map(v=>`<p class="text-xs py-1 border-b border-[--border-color]">${simEsc(v.productName)} ×${v.quantity} · 🪙 ${Number(v.grossRevenue||0).toLocaleString('pt-BR')}</p>`).join('')||'<p class="text-xs text-[--text-secondary]">Nenhuma compra.</p>'}<p class="text-xs mt-3"><strong>Por categoria:</strong> Produtos 🪙 ${currentSales.reduce((a,v)=>a+Number(v.grossRevenue||0),0).toLocaleString('pt-BR')} · Planos/Pacotes 🪙 ${recurring.reduce((a,e)=>a+Number(e.amount||0),0).toLocaleString('pt-BR')}</p></section>`})() : ''}
-                ${hasWallet && state.financeConfig.financialEra ? simHistoryHTML(simFinAccount('residents',sim.id)) : ''}
+            const tab=state.residentProfileTab||'overview';
+            const personalDataHTML=`<div class="grid grid-cols-2 gap-4"><div class="bg-[--card-bg] p-3 rounded-lg border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Gênero</strong>${simEsc(sim.gender||'Não definido')}</div><div class="bg-[--card-bg] p-3 rounded-lg border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Etnia</strong>${simEsc(sim.ethnicity||'Não definida')}</div><div class="bg-[--card-bg] p-3 rounded-lg border border-[--border-color] col-span-2"><strong class="block text-sm text-[--text-secondary]">Região</strong>${simEsc(region?.name||'Não especificada')}</div></div>`;
+            const occupationsSectionHTML=`<div class="bg-[--card-bg] p-4 rounded-lg border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Ocupações</h3>${!sim.isDeceased?`<button data-action="open-modal" data-modal-type="add-job" data-id="${sim.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold"><i data-lucide="plus" class="h-4 w-4"></i> Adicionar</button>`:''}</div><div class="space-y-2">${employmentHTML}</div></div>`;
+            const educationSectionHTML=(sim.education&&sim.education.length)?`<div class="bg-[--card-bg] p-4 rounded-lg border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Educação</h3><div class="space-y-2">${educationHTML}</div></div>`:'';
+            const politicsSectionHTML=`<div class="bg-[--card-bg] p-4 rounded-lg border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Vida Política</h3>${politicsHTML}</div>`;
+            const relationshipsSectionHTML=`<div class="bg-[--card-bg] p-4 rounded-lg border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Relações</h3><button data-action="open-modal" data-modal-type="add-relationship" data-id="${sim.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-1"><i data-lucide="plus" class="h-4 w-4"></i> Adicionar</button></div><div class="space-y-2">${relationshipsHTML.length?relationshipsHTML:'<p class="text-[--text-secondary] italic text-center py-4">Nenhuma relação cadastrada.</p>'}</div></div>`;
+            const professionalHistoryHTML=`<div class="bg-[--card-bg] p-4 rounded-lg border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Histórico profissional e político</h3><div class="space-y-2">${historyHTML.length?historyHTML:'<p class="text-[--text-secondary] italic text-center py-4">Nenhum histórico profissional ou político.</p>'}</div></div>`;
+            const consumptionSectionHTML=hasWallet?(()=>{const mySales=state.sales.filter(v=>v.buyerType==='resident'&&v.buyerId===sim.id),cycle=Number(state.financeConfig.cycleNumber||0),currentSales=mySales.filter(v=>Number(v.cycle||0)===cycle&&v.era===state.financeConfig.financialEra),recurring=(state.financialCycles||[]).filter(c=>c.era===state.financeConfig.financialEra&&c.cycle===cycle).flatMap(c=>c.entries||[]).filter(e=>e.from===simFinAccount('residents',sim.id)&&['subscription','package'].includes(e.kind)),total=currentSales.reduce((a,v)=>a+Number(v.grossRevenue||0),0)+recurring.reduce((a,e)=>a+Number(e.amount||0),0);return `<section class="bg-[--card-bg] p-4 rounded-lg border border-[--border-color]"><h3 class="font-bold text-lg mb-3">Consumo e Serviços</h3><p class="text-sm mb-3"><strong>Total gasto no ciclo ${cycle}:</strong> 🪙 ${total.toLocaleString('pt-BR')}</p><p class="text-xs font-bold uppercase text-[--text-secondary] mb-1">Assinaturas ativas</p>${state.subscriptions.filter(x=>x.subscriberType==='resident'&&x.subscriberId===sim.id&&x.active!==false).map(x=>`<p class="text-xs py-1">${simEsc(x.planName)} · 🪙 ${Number(x.planValue||x.price||0).toLocaleString('pt-BR')}/ciclo</p>`).join('')||'<p class="text-xs text-[--text-secondary]">Nenhuma.</p>'}<p class="text-xs font-bold uppercase text-[--text-secondary] mt-3 mb-1">Pacotes recorrentes</p>${state.consumptionPackages.filter(p=>isPackageEligibleForResident(p,sim,cycle+1,state)).map(p=>`<p class="text-xs py-1">${simEsc(p.name)} · 🪙 ${Number(p.price||0).toLocaleString('pt-BR')}/ciclo</p>`).join('')||'<p class="text-xs text-[--text-secondary]">Nenhum.</p>'}<p class="text-xs font-bold uppercase text-[--text-secondary] mt-3 mb-1">Compras avulsas</p>${mySales.slice(0,20).map(v=>`<p class="text-xs py-1 border-b border-[--border-color]">${simEsc(v.productName)} ×${v.quantity} · 🪙 ${Number(v.grossRevenue||0).toLocaleString('pt-BR')}</p>`).join('')||'<p class="text-xs text-[--text-secondary]">Nenhuma compra.</p>'}</section>`})():'';
+            const overviewHTML=`${personalDataHTML}<section class="bg-[--card-bg] p-4 rounded-xl border border-[--border-color]"><h3 class="font-bold mb-3">Resumo financeiro</h3><div class="grid grid-cols-2 gap-3"><div class="p-3 bg-[--bg-color] rounded"><p class="text-xs text-[--text-secondary]">Saldo</p><strong>🪙 ${Number(bal).toLocaleString('pt-BR')}</strong></div><div class="p-3 bg-[--bg-color] rounded"><p class="text-xs text-[--text-secondary]">Patrimônio líquido</p><strong>🪙 ${netWorth.toLocaleString('pt-BR')}</strong></div></div></section><section class="bg-[--card-bg] p-4 rounded-xl border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-bold">Ocupações atuais</h3><button data-action="set-resident-profile-tab" data-tab="life" class="text-xs font-bold text-[--sims-green-dark]">Ver detalhes →</button></div><div class="space-y-2">${employmentHTML}</div></section>${ownedAssets.length?`<section class="bg-[--card-bg] p-4 rounded-xl border border-[--border-color]"><h3 class="font-bold mb-2">Bens</h3><p class="text-sm">${ownedAssets.length} bem(ns) · 🪙 ${assetValue.toLocaleString('pt-BR')}</p></section>`:''}`;
+            const financeTabHTML=`${financeSectionHTML}${assetSummaryHTML}${consumptionSectionHTML}${hasWallet&&state.financeConfig.financialEra?simHistoryHTML(simFinAccount('residents',sim.id)):''}`;
+            const lifeTabHTML=`${occupationsSectionHTML}${educationSectionHTML}${politicsSectionHTML}${relationshipsSectionHTML}`;
+            const historyTabHTML=`<section class="bg-[--card-bg] p-4 rounded-xl border border-[--border-color]"><button data-action="open-entity-history" data-type="resident" data-id="${sim.id}" class="w-full text-left font-bold flex items-center justify-between"><span>📖 Linha do tempo de ${simEsc(sim.firstName)}</span><span class="text-xs text-[--text-secondary]">Abrir histórico completo →</span></button></section>${professionalHistoryHTML}`;
+            const tabContent=tab==='finance'?financeTabHTML:tab==='life'?lifeTabHTML:tab==='history'?historyTabHTML:overviewHTML;
+            const tabs=[
+                ['overview','layout-dashboard','Visão geral'],
+                ['finance','wallet-cards','Finanças'],
+                ['life','briefcase-business','Vida & Carreira'],
+                ['history','history','História']
+            ];
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Gênero</strong> ${sim.gender}</div>
-                    <div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color]"><strong class="block text-sm text-[--text-secondary]">Etnia</strong> ${sim.ethnicity || 'Não definida'}</div>
-                    <div class="bg-[--card-bg] p-3 rounded-lg shadow-sm border border-[--border-color] col-span-2"><strong class="block text-sm text-[--text-secondary]">Região</strong> ${region ? region.name : 'Não especificada'}</div>
-                </div>
-                
-                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Ocupações</h3>${!sim.isDeceased ? `<button data-action="open-modal" data-modal-type="add-job" data-id="${sim.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 transition"><i data-lucide="plus" class="h-4 w-4"></i> Adicionar</button>` : ""}</div><div class="space-y-2">${employmentHTML}</div></div>
-                ${(sim.education && sim.education.length > 0) ? `<div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Educação</h3><div class="space-y-2">${educationHTML}</div></div>` : ""}
-                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Vida Política</h3>${politicsHTML}</div>
-                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><h3 class="font-semibold text-lg mb-2">Histórico</h3><div class="space-y-2">${historyHTML.length ? historyHTML : '<p class="text-[--text-secondary] italic text-center py-4">Nenhum histórico profissional ou político.</p>'}</div></div>
-                <div class="bg-[--card-bg] p-4 rounded-lg shadow-sm border border-[--border-color]"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Relações</h3><button data-action="open-modal" data-modal-type="add-relationship" data-id="${sim.id}" class="bg-[--sims-green-vibrant] text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-500 flex items-center gap-1 transition"><i data-lucide="plus" class="h-4 w-4"></i> Adicionar</button></div><div class="space-y-2">${relationshipsHTML.length ? relationshipsHTML : '<p class="text-[--text-secondary] italic text-center py-4">Nenhuma relação cadastrada.</p>'}</div></div>
+            return `<div class="page-content p-4 md:p-6 space-y-5">
+                <div><button data-action="navigate" data-page="dashboard" class="flex items-center text-sm text-[--sims-green-dark] font-semibold mb-4"><i data-lucide="arrow-left" class="h-4 w-4 mr-2"></i> Voltar para a lista</button>${deceasedHeader}<div class="flex justify-between items-start gap-3"><div><h1 class="text-3xl font-bold text-[--sims-green-dark]">${simEsc(sim.firstName)} ${simEsc(sim.lastName)}</h1><p class="text-[--text-secondary]">${simEsc(sim.lifeStage||'')}</p></div><div class="flex items-center gap-2"><button data-action="open-modal" data-modal-type="edit-resident" data-id="${sim.id}" class="bg-[--border-color] px-4 py-2 rounded-lg text-sm font-semibold">Editar</button><button data-action="open-modal" data-modal-type="confirm-removal" data-id="${sim.id}" class="bg-[--danger-bg] text-[--danger-text] p-2 rounded-lg"><i data-lucide="trash-2" class="h-5 w-5"></i></button></div></div></div>
+                <nav class="bg-[--card-bg] border border-[--border-color] rounded-2xl p-2 grid grid-cols-2 sm:grid-cols-4 gap-2 shadow-sm">${tabs.map(([key,icon,label])=>`<button data-action="set-resident-profile-tab" data-tab="${key}" class="min-h-[66px] px-2 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex flex-col items-center justify-center gap-1.5 transition ${tab===key?'bg-[--sims-green-dark] text-white shadow-sm':'text-[--text-secondary] hover:bg-[--bg-color]'}"><i data-lucide="${icon}" class="h-5 w-5"></i><span>${label}</span></button>`).join('')}</nav>
+                <div class="space-y-5">${tabContent}</div>
             </div>`;
         }
 
@@ -1899,6 +1927,18 @@
                         <div class="mb-4"><label class="block text-sm font-medium mb-1 text-[--text-secondary]">Observação (opcional)</label><textarea name="notes" rows="2" class="w-full p-2 border rounded bg-[--bg-color]"></textarea></div>
                         <button class="w-full py-3 bg-red-700 text-white rounded-lg font-bold">Registrar e pagar</button>`;
                 } break;
+                case 'public-institution-grant': {
+                    title='Repasse Público para Instituição'; formId='public-institution-grant-form'; submitAction='public-institution-grant';
+                    const sources=[{value:'city',text:'Prefeitura / Administração Geral'},...simAllMinistries().map(m=>({value:m.id,text:`Ministério · ${m.name}`}))];
+                    const institutions=state.businesses.filter(b=>b.isPublicBody||b.sector==='Governamental').map(b=>({value:b.id,text:b.name}));
+                    contentHTML=institutions.length?`<p class="text-xs text-[--text-secondary] mb-3">O repasse transfere dinheiro existente no Tesouro para o caixa da instituição. Se a origem for um ministério, também consome o orçamento disponível dele.</p>
+                        ${createFormSelect('sourceMinistryId','Origem da verba',sources)}
+                        ${createFormSelect('businessId','Instituição pública',institutions)}
+                        ${createFormInput('amount','Valor do repasse (🪙)','', 'number')}
+                        ${createFormInput('reason','Motivo do repasse','')}
+                        ${createFormInput('destination','Destinação / finalidade','')}
+                        <button class="w-full py-3 bg-blue-700 text-white rounded-lg font-bold">Confirmar repasse</button>`:'<p class="text-sm text-[--text-secondary]">Nenhuma instituição pública cadastrada.</p>';
+                } break;
                 case 'budget-transfer': {
                     title='Transferir autorização orçamentária'; formId='budget-transfer-form'; submitAction='budget-transfer';
                     const opts=simAllMinistries().map(m=>({value:m.id,text:m.name}));
@@ -1985,22 +2025,11 @@
                 case 'mass-assign-expense': {
                     title = 'Atribuição em Massa'; formId = 'mass-assign-form'; submitAction = 'process-mass-assign';
                     const expenseOptions = state.fixedExpensesList.map((ex, i) => ({ value: i, text: `${ex.name} (${ex.type === 'percent' ? ex.value + '%' : '🪙 ' + ex.value})` }));
-                    const simsCheckboxes = state.residents.filter(r => !r.isDeceased).map(r => `<div class="flex items-center gap-2 p-1"><input type="checkbox" name="targetIds" value="resident|${r.id}" id="mass-${r.id}" class="w-4 h-4"><label for="mass-${r.id}" class="text-xs font-medium">${r.firstName} ${r.lastName}</label></div>`).join("");
-                    const bizCheckboxes = state.businesses.map(b => `<div class="flex items-center gap-2 p-1"><input type="checkbox" name="targetIds" value="business|${b.id}" id="mass-${b.id}" class="w-4 h-4"><label for="mass-${b.id}" class="text-xs font-medium">${b.name}</label></div>`).join("");
-                    contentHTML = `
-                        <p class="text-xs text-[--text-secondary] mb-4">Selecione o gasto padrão e quem deve recebê-lo de forma permanente.</p>
-                        ${createFormSelect('expenseIndex', 'Gasto a Atribuir', expenseOptions)}
-                        <div class="mb-4">
-                            <label class="block text-sm font-bold text-[--sims-green-dark] uppercase mb-2">Pessoas e Empresas</label>
-                            <div class="max-h-64 overflow-y-auto border p-2 rounded bg-[--bg-color] space-y-1">
-                                <p class="text-[10px] font-black uppercase text-gray-400 border-b mb-1">Cidadãos</p>
-                                ${simsCheckboxes}
-                                <p class="text-[10px] font-black uppercase text-gray-400 border-b mt-4 mb-1">Empresas</p>
-                                ${bizCheckboxes}
-                            </div>
-                        </div>
-                        <button type="submit" class="w-full bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold">Atribuir Gasto</button>
-                    `;
+                    contentHTML = `<p class="text-xs text-[--text-secondary] mb-4">Escolha um gasto. Pessoas e empresas que já possuem exatamente esse gasto ficam separadas e não podem ser selecionadas novamente.</p>
+                        <div class="mb-4"><label class="block text-sm font-medium mb-1 text-[--text-secondary]">Gasto a atribuir</label><select name="expenseIndex" data-action="mass-expense-select" class="w-full px-3 py-2 border border-[--border-color] rounded-md bg-[--bg-color]">${expenseOptions.map((o,i)=>`<option value="${o.value}" ${i===0?'selected':''}>${simEsc(o.text)}</option>`).join('')}</select></div>
+                        <input type="search" data-action="mass-expense-search" placeholder="Buscar morador ou empresa..." class="w-full px-3 py-2 border border-[--border-color] rounded-md bg-[--bg-color] mb-3">
+                        <div id="mass-assign-targets">${simMassAssignTargetsHTML(0)}</div>
+                        <button type="submit" class="w-full mt-4 bg-[--sims-green-dark] text-white py-3 rounded-lg font-bold">Atribuir Gasto</button>`;
                 } break;
 
                 case 'add-product':
@@ -2951,6 +2980,34 @@
             });
             if(expenseType==='investment') await simRecordHistoryEvent({title:`Investimento público: ${reason.trim()}`,description:`Destinação: ${destination.trim()}.`,category:'public',amount,importance:'important'});
         }
+        async function simPublicInstitutionGrant(sourceMinistryId,businessId,rawAmount,reason,destination) {
+            const amount=simMoney(simParseMoney(rawAmount));
+            if(!state.financeConfig.financialEra||!simValidMoney(amount)||amount<=0) throw new Error('Valor inválido.');
+            if(!reason?.trim()||!destination?.trim()) throw new Error('Informe motivo e destinação.');
+            const institution=state.businesses.find(b=>b.id===businessId&&(b.isPublicBody||b.sector==='Governamental'));
+            if(!institution) throw new Error('Instituição pública inválida.');
+            const useBudget=sourceMinistryId!=='city', era=state.financeConfig.financialEra, cycle=simBudgetCycle();
+            const cfgRef=doc(db,'config','finance'), bizRef=doc(db,'businesses',businessId), budgetRef=useBudget?doc(db,'publicBudgets',simBudgetDocId(era,cycle,sourceMinistryId)):null;
+            const budgetTxRef=doc(collection(db,'publicBudgetTransactions')), finRef=doc(collection(db,'financialTransactions'));
+            await runTransaction(db,async tx=>{
+                const cfg=await tx.get(cfgRef), biz=await tx.get(bizRef), budget=budgetRef?await tx.get(budgetRef):null;
+                if(!cfg.exists()||cfg.data().financialEra!==era) throw new Error('Era financeira mudou.');
+                if(!biz.exists()) throw new Error('Instituição pública não encontrada.');
+                if(useBudget&&!budget.exists()) throw new Error('Defina o orçamento deste ministério para o ciclo.');
+                const b=budget?.data()||{allocated:0,executed:0};
+                const projection=simInstitutionGrantProjection(Number(cfg.data().treasuryBalance||0),Number(b.allocated||0),Number(b.executed||0),amount,useBudget);
+                if(!projection.ok) throw new Error(projection.reason==='Orçamento insuficiente'?'Repasse acima do orçamento disponível do ministério.':'Tesouro sem saldo suficiente.');
+                if(useBudget) tx.update(budgetRef,{executed:projection.executedAfter,updatedAt:serverTimestamp()});
+                tx.update(cfgRef,{treasuryBalance:projection.treasuryAfter,totalCirculating:simMoney(Number(cfg.data().totalCirculating||0)+amount)});
+                tx.update(bizRef,{balance:simMoney(Number(biz.data().balance||0)+amount),updatedAt:serverTimestamp()});
+                const ministry=useBudget?simAllMinistries().find(m=>m.id===sourceMinistryId):null;
+                const sourceLabel=useBudget?(ministry?.name||'Ministério'):'Prefeitura / Administração Geral';
+                tx.set(budgetTxRef,{era,cycle,ministryId:useBudget?sourceMinistryId:null,sourceType:useBudget?'ministry':'city',type:'institution-grant',typeLabel:'Repasse institucional',amount,reason:reason.trim(),destination:destination.trim(),beneficiary:`businesses:${businessId}`,institutionName:institution.name,sourceLabel,createdAt:serverTimestamp()});
+                tx.set(finRef,{from:'treasury',to:`businesses:${businessId}`,amount,label:`Repasse público: ${institution.name}`,kind:'public-institution-grant',ministryId:useBudget?sourceMinistryId:null,sourceLabel,destination:destination.trim(),era,cycle,date:serverTimestamp()});
+            });
+            await simRecordHistoryEvent({title:`Repasse público para ${institution.name}`,description:`${reason.trim()} · Destinação: ${destination.trim()}.`,category:'public',businessIds:[businessId],amount,importance:'important'});
+        }
+
         async function simTransferBudget(fromMinistryId,toMinistryId,rawAmount,reason) {
             const amount=simMoney(simParseMoney(rawAmount));
             if(!state.financeConfig.financialEra||!simValidMoney(amount)||amount<=0) throw new Error('Valor inválido.');
@@ -3045,6 +3102,7 @@
                 switch (action) {
                     case 'set-public-budget': await simSetPublicBudget(data.ministryId,data.amount); break;
                     case 'public-expense': await simPublicExpense(data.ministryId,data.expenseType,data.amount,data.reason,data.destination,data.beneficiaryData,data.notes); break;
+                    case 'public-institution-grant': await simPublicInstitutionGrant(data.sourceMinistryId,data.businessId,data.amount,data.reason,data.destination); break;
                     case 'budget-transfer': await simTransferBudget(data.fromMinistryId,data.toMinistryId,data.amount,data.reason); break;
                     case 'joint-public-project': await simJointPublicProject(formData,data); break;
                     case 'process-apply-fine': {
@@ -3120,19 +3178,16 @@
                     case 'process-mass-assign': {
                         const targetIds = formData.getAll('targetIds');
                         const expense = state.fixedExpensesList[parseInt(data.expenseIndex)];
-                        const batch = writeBatch(db);
+                        if(!expense) throw new Error('Selecione um gasto válido.');
+                        const batch = writeBatch(db); let changed=0;
                         targetIds.forEach(target => {
                             const [type, tid] = target.split('|');
-                            if (type === 'resident') {
-                                const sim = state.residents.find(r => r.id === tid);
-                                batch.update(doc(db, "residents", tid), { fixedExpenses: [...(sim.fixedExpenses || []), expense] });
-                            } else {
-                                const biz = state.businesses.find(b => b.id === tid);
-                                batch.update(doc(db, "businesses", tid), { fixedExpenses: [...(biz.fixedExpenses || []), expense] });
-                            }
+                            const entity=type==='resident'?state.residents.find(r=>r.id===tid):state.businesses.find(b=>b.id===tid);
+                            if(!entity||simHasFixedExpense(entity,expense)) return;
+                            batch.update(doc(db, type==='resident'?'residents':'businesses', tid), { fixedExpenses: [...(entity.fixedExpenses || []), expense] }); changed++;
                         });
-                        await batch.commit();
-                        alert("Atribuição em massa concluída!");
+                        if(changed) await batch.commit();
+                        alert(changed?`Atribuição concluída para ${changed} registro(s).`:'Nenhum novo registro precisava receber este gasto.');
                     } break;
                     case 'save-product': {
                         const salePrice=Number(data.salePrice), unitCost=Number(data.unitCost), stockQty=Number(data.stockQty||0), stockEnabled=formData.has('stockEnabled');
@@ -4450,6 +4505,10 @@
         document.addEventListener('change', (e)=>{
             if(e.target?.dataset?.action==='price-history-select'){state.selectedPriceKey=e.target.value;render();}
             if(e.target?.dataset?.action==='region-ranking-metric'){state.regionRankingMetric=e.target.value;render();}
+            if(e.target?.dataset?.action==='mass-expense-select'){const box=document.getElementById('mass-assign-targets');if(box)box.innerHTML=simMassAssignTargetsHTML(e.target.value);}
+        });
+        document.addEventListener('input',(e)=>{
+            if(e.target?.dataset?.action==='mass-expense-search'){const q=String(e.target.value||'').trim().toLowerCase();document.querySelectorAll('#mass-assign-targets .mass-target-row').forEach(row=>{row.style.display=!q||String(row.dataset.massTargetName||'').includes(q)?'':'none';});}
         });
 
         document.addEventListener('click', async (e) => {
@@ -4458,6 +4517,16 @@
 
             switch (action) {
                 case 'set-insights-tab': state.insightsTab=tab||'indicators'; render(); break;
+                case 'set-resident-profile-tab': {
+                    state.residentProfileTab=tab||'overview';
+                    render();
+                    requestAnimationFrame(()=>window.scrollTo({top:0,left:0,behavior:'auto'}));
+                } break;
+                case 'mass-select-all': {
+                    document.querySelectorAll('#mass-assign-targets .mass-target-checkbox:not(:disabled)').forEach(x=>{
+                        if(x.closest('.mass-target-row')?.style.display!=='none') x.checked=true;
+                    });
+                } break;
                 case 'set-indicator-chart': state.indicatorChartType=type||'line'; render(); break;
                 case 'toggle-indicator-cycle': {
                     const arr=[...(state.selectedIndicatorCycles||[])],i=arr.indexOf(id); if(i>=0)arr.splice(i,1);else arr.push(id); state.selectedIndicatorCycles=arr; render();
@@ -4514,13 +4583,13 @@
                 case 'navigate': state.currentPage = page; state.searchQuery = ""; render(); break;
                 case 'view-profile':
                     state.currentPage = `${type}-profile`;
-                    if (type === 'resident') state.currentResidentId = id;
+                    if (type === 'resident') { state.currentResidentId = id; state.residentProfileTab = 'overview'; }
                     else if (type === 'business') { state.currentBusinessId = id; state.activeStudentTab = 'ativos'; }
                     else if (type === 'party') state.currentPartyId = id;
                     else if (type === 'council') state.currentCouncilId = id;
                     else if (type === 'region') state.currentRegionId = id;
                     else if (type === 'branch') state.currentBranchId = id;
-                    state.searchQuery = ""; render(); break;
+                    state.searchQuery = ""; render(); if(type==='resident')requestAnimationFrame(()=>window.scrollTo({top:0,left:0,behavior:'auto'})); break;
                 case 'open-modal': renderModal(modalType, id, e); break;
                 case 'close-modal': closeModal(); break;
                 case 'delete-history-entry': handleDeleteHistoryEntry(target.dataset.residentId, target.dataset.historyId); break;
